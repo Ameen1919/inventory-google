@@ -1,0 +1,10 @@
+service_account.json
+.streamlit/secrets.toml
+cleaning_inventory.db
+attachments/
+backups/
+logo.png
+app_config.json
+__pycache__/
+*.pyc
+.DS_Store
