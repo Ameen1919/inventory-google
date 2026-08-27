@@ -7,16 +7,15 @@ import os
 import json
 import hashlib
 import re
-import arabic_reshaper
-from bidi.algorithm import get_display
 import base64
-from fpdf import FPDF
 import shutil
 import zipfile
-import tempfile
 import urllib.request
+from fpdf import FPDF
+import arabic_reshaper
+from bidi.algorithm import get_display
 
-# لمزامنة Google Drive
+# مكتبات Google Drive
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
@@ -31,7 +30,7 @@ BACKUP_FOLDER = 'backups'
 ATTACHMENTS_FOLDER = 'attachments'
 LOGO_FILE = 'logo.png'
 
-# إعدادات Google Drive من secrets
+# إعدادات Google Drive من الأسرار
 GDRIVE_ENABLED = st.secrets.get("google_drive", {}).get("enabled", False)
 GDRIVE_FOLDER_ID = st.secrets.get("google_drive", {}).get("folder_id", "")
 SERVICE_ACCOUNT_FILE = st.secrets.get("google_drive", {}).get("service_account_file", "service_account.json")
@@ -42,14 +41,28 @@ os.makedirs(ATTACHMENTS_FOLDER, exist_ok=True)
 
 # ======================== دوال Google Drive ========================
 def get_drive_service():
-    """إنشاء خدمة Google Drive"""
+    """إنشاء خدمة Google Drive مع دعم الأسرار أو الملف المحلي"""
     if not GDRIVE_ENABLED:
         return None
     try:
-        creds = service_account.Credentials.from_service_account_file(
-            SERVICE_ACCOUNT_FILE,
-            scopes=['https://www.googleapis.com/auth/drive']
-        )
+        # 1) محاولة قراءة بيانات الحساب من الأسرار (للاستخدام السحابي)
+        service_account_info_str = st.secrets.get("google_drive", {}).get("service_account_info")
+        if service_account_info_str:
+            service_account_info = json.loads(service_account_info_str)
+            creds = service_account.Credentials.from_service_account_info(
+                service_account_info,
+                scopes=['https://www.googleapis.com/auth/drive']
+            )
+        else:
+            # 2) الرجوع إلى ملف محلي (للاستخدام المحلي)
+            if os.path.exists(SERVICE_ACCOUNT_FILE):
+                creds = service_account.Credentials.from_service_account_file(
+                    SERVICE_ACCOUNT_FILE,
+                    scopes=['https://www.googleapis.com/auth/drive']
+                )
+            else:
+                st.error("لا توجد بيانات اعتماد Google Drive. أضف service_account_info في الأسرار أو service_account.json محليًا.")
+                return None
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
         st.error(f"خطأ في الاتصال بـ Google Drive: {str(e)}")
@@ -63,13 +76,10 @@ def upload_db_to_drive():
     if not service:
         return False
     try:
-        # البحث عن ملف بنفس الاسم في المجلد المحدد
         query = f"'{GDRIVE_FOLDER_ID}' in parents and name = '{DB_NAME}' and trashed = false"
         results = service.files().list(q=query, fields="files(id)").execute()
         files = results.get('files', [])
-        
         media = MediaFileUpload(DB_NAME, mimetype='application/x-sqlite3')
-        
         if files:
             file_id = files[0]['id']
             service.files().update(fileId=file_id, media_body=media).execute()
@@ -97,7 +107,6 @@ def download_db_from_drive():
         files = results.get('files', [])
         if not files:
             return False
-        
         file_id = files[0]['id']
         request = service.files().get_media(fileId=file_id)
         with open(DB_NAME, 'wb') as f:
@@ -171,7 +180,6 @@ def get_db():
 def init_db():
     conn = get_db()
     c = conn.cursor()
-    # إنشاء الجداول كما في الكود الأصلي
     c.execute('''CREATE TABLE IF NOT EXISTS units (id INTEGER PRIMARY KEY AUTOINCREMENT, unit_name TEXT UNIQUE, unit_symbol TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, supplier_name TEXT UNIQUE, contact_info TEXT, notes TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS items (
@@ -252,11 +260,11 @@ def init_db():
         is_active BOOLEAN DEFAULT 1
     )''')
 
-    # إضافة الوحدات الافتراضية
+    # وحدات افتراضية
     for u_name, u_sym in [('قطعة','قطعة'),('لتر','لتر'),('كيلو','كجم'),('متر','متر'),
                          ('كرتونة','كرتونة'),('رول','رول'),('زجاجة','زجاجة'),('علبة','علبة'),('كيس','كيس')]:
         c.execute("INSERT OR IGNORE INTO units (unit_name, unit_symbol) VALUES (?,?)",(u_name,u_sym))
-    # المستخدمين الافتراضيين
+    # مستخدمون افتراضيون
     default_users = [
         ('admin',hash_password('admin123'),'super_admin','المدير العام'),
         ('مشتريات',hash_password('buy123'),'purchasing','مسؤول المشتريات'),
@@ -431,9 +439,12 @@ def recalculate_all_balances():
 
 # ======================== تشغيل أولي ========================
 init_db()
-# استعادة من Drive إذا لم توجد قاعدة محلية (أو إذا كانت فارغة)
-if GDRIVE_ENABLED and not os.path.exists(DB_NAME):
-    download_db_from_drive()
+# محاولة تحميل قاعدة البيانات من Google Drive إذا كانت المزامنة مفعلة
+if GDRIVE_ENABLED:
+    if download_db_from_drive():
+        st.success("✅ تم تحميل قاعدة البيانات من Google Drive")
+    else:
+        st.warning("⚠️ لم يتم العثور على قاعدة بيانات في Drive، سيتم استخدام قاعدة محلية جديدة")
 
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
