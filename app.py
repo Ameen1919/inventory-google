@@ -403,10 +403,21 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 import json
 
 def get_drive_service():
-    """إنشاء عميل Drive باستخدام بيانات الاعتماد من secrets (JSON مباشرة)"""
+    """إنشاء عميل Drive باستخدام بيانات credentials من secrets"""
     try:
-        creds_str = st.secrets["google"]["credentials_json"]
-        creds_dict = json.loads(creds_str)
+        creds_dict = {
+            "type": st.secrets["google"]["type"],
+            "project_id": st.secrets["google"]["project_id"],
+            "private_key_id": st.secrets["google"]["private_key_id"],
+            "private_key": st.secrets["google"]["private_key"].replace('\\n', '\n'),
+            "client_email": st.secrets["google"]["client_email"],
+            "client_id": st.secrets["google"]["client_id"],
+            "auth_uri": st.secrets["google"]["auth_uri"],
+            "token_uri": st.secrets["google"]["token_uri"],
+            "auth_provider_x509_cert_url": st.secrets["google"]["auth_provider_x509_cert_url"],
+            "client_x509_cert_url": st.secrets["google"]["client_x509_cert_url"],
+            "universe_domain": st.secrets["google"]["universe_domain"]
+        }
         credentials = service_account.Credentials.from_service_account_info(
             creds_dict,
             scopes=['https://www.googleapis.com/auth/drive']
