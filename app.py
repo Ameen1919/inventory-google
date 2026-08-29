@@ -396,18 +396,22 @@ def save_attachment(uploaded_file, transaction_id):
     with open(file_path, "wb") as f: f.write(uploaded_file.getbuffer())
     return safe_name
 
-# ======================== مزامنة Google Drive (باستخدام google-api-python-client) ========================
+# ======================== مزامنة Google Drive (باستخدام Base64) ========================
 import json
 import io
+import base64
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 def get_drive_service():
-    """إنشاء عميل Drive باستخدام بيانات الاعتماد من secrets"""
+    """إنشاء عميل Drive باستخدام بيانات الاعتماد من secrets (Base64)"""
     try:
-        # قراءة بيانات الاعتماد من ملف secrets
-        creds_dict = json.loads(st.secrets["google"]["credentials_json"])
+        # الحصول على النص المشفر Base64 من الأسرار
+        encoded_credentials = st.secrets["google"]["credentials_base64"]
+        # فك الترميز Base64 إلى JSON string
+        decoded_bytes = base64.b64decode(encoded_credentials)
+        creds_dict = json.loads(decoded_bytes.decode('utf-8'))
         credentials = service_account.Credentials.from_service_account_info(
             creds_dict,
             scopes=['https://www.googleapis.com/auth/drive']
