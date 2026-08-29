@@ -396,22 +396,17 @@ def save_attachment(uploaded_file, transaction_id):
     with open(file_path, "wb") as f: f.write(uploaded_file.getbuffer())
     return safe_name
 
-# ======================== مزامنة Google Drive (باستخدام Base64) ========================
-import json
-import io
-import base64
+# ======================== مزامنة Google Drive (JSON مباشرة) ========================
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+import json
 
 def get_drive_service():
-    """إنشاء عميل Drive باستخدام بيانات الاعتماد من secrets (Base64)"""
+    """إنشاء عميل Drive باستخدام بيانات الاعتماد من secrets (JSON مباشرة)"""
     try:
-        # الحصول على النص المشفر Base64 من الأسرار
-        encoded_credentials = st.secrets["google"]["credentials_base64"]
-        # فك الترميز Base64 إلى JSON string
-        decoded_bytes = base64.b64decode(encoded_credentials)
-        creds_dict = json.loads(decoded_bytes.decode('utf-8'))
+        creds_str = st.secrets["google"]["credentials_json"]
+        creds_dict = json.loads(creds_str)
         credentials = service_account.Credentials.from_service_account_info(
             creds_dict,
             scopes=['https://www.googleapis.com/auth/drive']
@@ -431,17 +426,12 @@ def upload_db_to_drive():
         return False
     try:
         folder_id = st.secrets["drive"]["folder_id"]
-        # البحث عن ملف قديم بنفس الاسم وحذفه
         query = f"name='{DB_NAME}' and '{folder_id}' in parents and trashed=false"
         results = drive.files().list(q=query, fields='files(id)').execute()
         files = results.get('files', [])
         for f in files:
             drive.files().delete(fileId=f['id']).execute()
-        # رفع الملف الجديد
-        file_metadata = {
-            'name': DB_NAME,
-            'parents': [folder_id]
-        }
+        file_metadata = {'name': DB_NAME, 'parents': [folder_id]}
         media = MediaFileUpload(DB_NAME, resumable=True)
         uploaded = drive.files().create(body=file_metadata, media_body=media, fields='id').execute()
         return True
@@ -483,7 +473,6 @@ def sync_db_if_needed():
                 return True
             else:
                 st.warning("⚠️ لم يتم العثور على نسخة احتياطية في Drive. سيتم إنشاء قاعدة بيانات جديدة.")
-                # init_db() سيتم استدعاؤها في بدء التشغيل
                 return True
     return False
 
