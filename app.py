@@ -22,10 +22,7 @@ st.set_page_config(page_title="مخزن النظافة", layout="wide", initial_
 APP_CONFIG_FILE = 'app_config.json'
 
 def load_app_config():
-    if os.path.exists(APP_CONFIG_FILE):
-        with open(APP_CONFIG_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return {
+    config = {
         'font_size': 100,
         'theme_color': "#00a86b",
         'logo_path': None,
@@ -34,6 +31,16 @@ def load_app_config():
         'telegram_chat_id': "",
         'telegram_file_id': ""
     }
+    if os.path.exists(APP_CONFIG_FILE):
+        with open(APP_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            config.update(json.load(f))
+    try:
+        if 'telegram' in st.secrets:
+            config['telegram_bot_token'] = st.secrets['telegram']['bot_token']
+            config['telegram_chat_id'] = st.secrets['telegram']['chat_id']
+    except:
+        pass
+    return config
 
 def save_app_config(config):
     with open(APP_CONFIG_FILE, 'w', encoding='utf-8') as f:
@@ -41,7 +48,6 @@ def save_app_config(config):
 
 saved_config = load_app_config()
 
-# ======================== تحميل الإعدادات في session_state ========================
 if 'font_size' not in st.session_state:
     st.session_state.font_size = saved_config.get('font_size', 100)
 if 'theme_color' not in st.session_state:
@@ -85,7 +91,6 @@ if not os.path.exists(BACKUP_FOLDER):
 if not os.path.exists(ATTACHMENTS_FOLDER):
     os.makedirs(ATTACHMENTS_FOLDER)
 
-# ======================== دوال مساعدة ========================
 def hash_password(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
 
@@ -97,7 +102,6 @@ def get_db():
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-
     c.execute('''CREATE TABLE IF NOT EXISTS units (id INTEGER PRIMARY KEY AUTOINCREMENT, unit_name TEXT UNIQUE, unit_symbol TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, supplier_name TEXT UNIQUE, contact_info TEXT, notes TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS items (
@@ -113,12 +117,9 @@ def init_db():
         notes TEXT,
         is_active BOOLEAN DEFAULT 1,
         created_date TEXT,
-        last_updated TEXT,
-        FOREIGN KEY (unit_id) REFERENCES units(id),
-        FOREIGN KEY (primary_supplier_id) REFERENCES suppliers(id)
+        last_updated TEXT
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS hotels (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, contact_person TEXT, phone TEXT, notes TEXT)''')
-
     c.execute('''CREATE TABLE IF NOT EXISTS outward_orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         order_number TEXT UNIQUE,
@@ -126,10 +127,8 @@ def init_db():
         recipient_name TEXT,
         order_date TEXT,
         notes TEXT,
-        created_by TEXT,
-        FOREIGN KEY (hotel_id) REFERENCES hotels(id)
+        created_by TEXT
     )''')
-
     c.execute('''CREATE TABLE IF NOT EXISTS transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         transaction_type TEXT,
@@ -145,18 +144,13 @@ def init_db():
         attachment TEXT,
         order_id INTEGER,
         supplier_name TEXT,
-        unit_price REAL DEFAULT 0,
-        FOREIGN KEY (item_id) REFERENCES items(id),
-        FOREIGN KEY (hotel_id) REFERENCES hotels(id),
-        FOREIGN KEY (unit_id) REFERENCES units(id),
-        FOREIGN KEY (order_id) REFERENCES outward_orders(id)
+        unit_price REAL DEFAULT 0
     )''')
-    for col, col_def in [('attachment', 'TEXT'), ('order_id', 'INTEGER'), ('supplier_name', 'TEXT'), ('unit_price', 'REAL')]:
+    for col, col_def in [('attachment','TEXT'),('order_id','INTEGER'),('supplier_name','TEXT'),('unit_price','REAL')]:
         try:
             c.execute(f"ALTER TABLE transactions ADD COLUMN {col} {col_def}")
-        except sqlite3.OperationalError:
+        except:
             pass
-
     c.execute('''CREATE TABLE IF NOT EXISTS inventory_counts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         count_date TEXT,
@@ -165,8 +159,7 @@ def init_db():
         actual_qty REAL,
         difference REAL,
         notes TEXT,
-        counted_by TEXT,
-        FOREIGN KEY (item_id) REFERENCES items(id)
+        counted_by TEXT
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS expiry_alerts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -174,22 +167,18 @@ def init_db():
         batch_number TEXT,
         expiry_date TEXT,
         qty_remaining REAL,
-        is_consumed BOOLEAN DEFAULT 0,
-        FOREIGN KEY (item_id) REFERENCES items(id)
+        is_consumed BOOLEAN DEFAULT 0
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        role TEXT NOT NULL CHECK (role IN ('super_admin', 'purchasing', 'disbursement', 'supervisor')),
+        username TEXT UNIQUE,
+        password TEXT,
+        role TEXT,
         full_name TEXT,
         is_active BOOLEAN DEFAULT 1
     )''')
-
-    for u_name, u_sym in [('قطعة','قطعة'),('لتر','لتر'),('كيلو','كجم'),('متر','متر'),
-                         ('كرتونة','كرتونة'),('رول','رول'),('زجاجة','زجاجة'),('علبة','علبة'),('كيس','كيس')]:
+    for u_name,u_sym in [('قطعة','قطعة'),('لتر','لتر'),('كيلو','كجم'),('متر','متر'),('كرتونة','كرتونة'),('رول','رول'),('زجاجة','زجاجة'),('علبة','علبة'),('كيس','كيس')]:
         c.execute("INSERT OR IGNORE INTO units (unit_name, unit_symbol) VALUES (?,?)",(u_name,u_sym))
-
     default_users = [
         ('admin',hash_password('admin123'),'super_admin','المدير العام'),
         ('مشتريات',hash_password('buy123'),'purchasing','مسؤول المشتريات'),
@@ -204,8 +193,7 @@ def init_db():
 
 def login(username, password):
     conn = get_db()
-    user = conn.execute("SELECT * FROM users WHERE username=? AND password=? AND is_active=1",
-                        (username,hash_password(password))).fetchone()
+    user = conn.execute("SELECT * FROM users WHERE username=? AND password=? AND is_active=1",(username,hash_password(password))).fetchone()
     conn.close()
     if user:
         st.session_state.user = dict(user)
@@ -227,7 +215,6 @@ def check_perm(role=None):
 def has_role(role):
     return st.session_state.get('user',{}).get('role')==role
 
-# ======================== PDF عربي ========================
 def get_arabic_font():
     path = "Amiri-Regular.ttf"
     if not os.path.exists(path):
@@ -280,7 +267,6 @@ def generate_pdf(title, df, cols_map=None):
             v = str(row[col]) if pd.notnull(row[col]) else '-'
             pdf.cell(widths[i],8, shape_arabic(v), border=1, align='C')
         pdf.ln()
-    # إضافة تاريخ ووقت الطباعة أسفل التقرير
     pdf.ln(5)
     pdf.set_font("Amiri", size=10) if font_path else pdf.set_font("Helvetica", size=10)
     pdf.cell(0, 8, shape_arabic(f"تاريخ الطباعة: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"), ln=True, align='L')
@@ -301,17 +287,14 @@ def export_buttons(df, prefix, pdf_title=None):
 def generate_outward_order_number():
     conn = get_db()
     today_str = date.today().strftime("%Y%m%d")
-    last = conn.execute("SELECT order_number FROM outward_orders WHERE order_number LIKE ? ORDER BY id DESC LIMIT 1",
-                        (f"OUT-{today_str}-%",)).fetchone()
+    last = conn.execute("SELECT order_number FROM outward_orders WHERE order_number LIKE ? ORDER BY id DESC LIMIT 1",(f"OUT-{today_str}-%",)).fetchone()
     conn.close()
     if last:
-        last_num = int(last['order_number'].split('-')[-1])
-        new_num = last_num + 1
+        last_num = int(last['order_number'].split('-')[-1]) + 1
     else:
-        new_num = 1
-    return f"OUT-{today_str}-{new_num:04d}"
+        last_num = 1
+    return f"OUT-{today_str}-{last_num:04d}"
 
-# ======================== النسخ الاحتياطي ========================
 def load_backup_config():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE,'r',encoding='utf-8') as f: return json.load(f)
@@ -352,11 +335,6 @@ def create_backup(typ="يدوي",notes=""):
 
 def restore_backup(zip_path):
     try:
-        try:
-            conn = sqlite3.connect(DB_NAME)
-            conn.close()
-        except:
-            pass
         tmp = "tmp_res"
         if os.path.exists(tmp): shutil.rmtree(tmp)
         os.makedirs(tmp)
@@ -367,62 +345,62 @@ def restore_backup(zip_path):
             shutil.copy2(db_src, DB_NAME)
         shutil.rmtree(tmp)
         recalculate_all_balances()
-        return True, "تمت الاستعادة بنجاح وتم إعادة حساب جميع الأرصدة."
+        return True, "تمت الاستعادة بنجاح وتم إعادة حساب الأرصدة"
     except Exception as e:
         return False, str(e)
 
 def delete_transaction(trans_id):
     conn = get_db()
-    trans = conn.execute("SELECT * FROM transactions WHERE id=?", (trans_id,)).fetchone()
+    trans = conn.execute("SELECT * FROM transactions WHERE id=?",(trans_id,)).fetchone()
     if not trans:
-        conn.close()
-        return False, "الحركة غير موجودة"
-    item_id = trans['item_id']
-    qty = trans['qty']
-    typ = trans['transaction_type']
-    if typ == 'وارد' or typ == 'تسوية إضافة':
-        conn.execute("UPDATE items SET current_balance = current_balance - ?, last_updated=? WHERE id=?", (qty, date.today().isoformat(), item_id))
-    elif typ == 'صادر' or typ == 'تسوية عجز':
-        conn.execute("UPDATE items SET current_balance = current_balance + ?, last_updated=? WHERE id=?", (qty, date.today().isoformat(), item_id))
-    conn.execute("DELETE FROM transactions WHERE id=?", (trans_id,))
-    conn.commit()
-    conn.close()
+        conn.close(); return False, "الحركة غير موجودة"
+    item_id = trans['item_id']; qty = trans['qty']; typ = trans['transaction_type']
+    if typ in ('وارد','تسوية إضافة'):
+        conn.execute("UPDATE items SET current_balance=current_balance-? WHERE id=?",(qty,item_id))
+    elif typ in ('صادر','تسوية عجز'):
+        conn.execute("UPDATE items SET current_balance=current_balance+? WHERE id=?",(qty,item_id))
+    conn.execute("DELETE FROM transactions WHERE id=?",(trans_id,))
+    conn.commit(); conn.close()
     return True, "تم حذف الحركة بنجاح"
 
 def delete_outward_order(order_id):
     conn = get_db()
-    trans_items = conn.execute("SELECT item_id, qty FROM transactions WHERE order_id=? AND transaction_type='صادر'", (order_id,)).fetchall()
-    for t in trans_items:
-        conn.execute("UPDATE items SET current_balance = current_balance + ?, last_updated=? WHERE id=?", (t['qty'], date.today().isoformat(), t['item_id']))
-    conn.execute("DELETE FROM transactions WHERE order_id=?", (order_id,))
-    conn.execute("DELETE FROM outward_orders WHERE id=?", (order_id,))
-    conn.commit()
-    conn.close()
-    return True, "تم حذف الإذن وإعادة الكميات إلى المخزون"
+    items = conn.execute("SELECT item_id,qty FROM transactions WHERE order_id=?",(order_id,)).fetchall()
+    for it in items:
+        conn.execute("UPDATE items SET current_balance=current_balance+? WHERE id=?",(it['qty'],it['item_id']))
+    conn.execute("DELETE FROM transactions WHERE order_id=?",(order_id,))
+    conn.execute("DELETE FROM outward_orders WHERE id=?",(order_id,))
+    conn.commit(); conn.close()
+    return True, "تم حذف الإذن وإعادة الكميات"
 
 def save_attachment(uploaded_file, transaction_id):
     if uploaded_file is None: return None
-    file_ext = os.path.splitext(uploaded_file.name)[1]
-    safe_name = f"trans_{transaction_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}{file_ext}"
-    file_path = os.path.join(ATTACHMENTS_FOLDER, safe_name)
-    with open(file_path, "wb") as f: f.write(uploaded_file.getbuffer())
+    ext = os.path.splitext(uploaded_file.name)[1]
+    safe_name = f"trans_{transaction_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
+    path = os.path.join(ATTACHMENTS_FOLDER, safe_name)
+    with open(path,"wb") as f: f.write(uploaded_file.getbuffer())
     return safe_name
 
-# ======================== دوال تيليجرام ========================
+def recalculate_all_balances():
+    conn = get_db()
+    items = conn.execute("SELECT id FROM items").fetchall()
+    for item in items:
+        tin = conn.execute("SELECT COALESCE(SUM(qty),0) FROM transactions WHERE item_id=? AND transaction_type IN ('وارد','تسوية إضافة')",(item['id'],)).fetchone()[0]
+        tout = conn.execute("SELECT COALESCE(SUM(qty),0) FROM transactions WHERE item_id=? AND transaction_type IN ('صادر','تسوية عجز')",(item['id'],)).fetchone()[0]
+        conn.execute("UPDATE items SET current_balance=? WHERE id=?",(tin-tout,item['id']))
+    conn.commit(); conn.close()
+
 def telegram_send_document(file_path, caption=""):
-    token = st.session_state.get('telegram_bot_token', '')
-    chat_id = st.session_state.get('telegram_chat_id', '')
+    token = st.session_state.telegram_bot_token
+    chat_id = st.session_state.telegram_chat_id
     if not token or not chat_id:
         return False, "يرجى إدخال بيانات تيليجرام أولاً"
     url = f"https://api.telegram.org/bot{token}/sendDocument"
     try:
-        with open(file_path, 'rb') as f:
-            files = {'document': f}
-            data = {'chat_id': chat_id, 'caption': caption}
-            response = requests.post(url, files=files, data=data)
-            if response.status_code == 200:
-                result = response.json().get('result', {})
-                file_id = result.get('document', {}).get('file_id')
+        with open(file_path,'rb') as f:
+            resp = requests.post(url, files={'document':f}, data={'chat_id':chat_id,'caption':caption})
+            if resp.status_code == 200:
+                file_id = resp.json().get('result',{}).get('document',{}).get('file_id')
                 if file_id:
                     st.session_state.telegram_file_id = file_id
                     save_app_config({
@@ -434,62 +412,44 @@ def telegram_send_document(file_path, caption=""):
                         'telegram_chat_id': st.session_state.telegram_chat_id,
                         'telegram_file_id': st.session_state.telegram_file_id
                     })
-                return True, "تم الإرسال إلى تيليجرام بنجاح"
+                return True, "تم الإرسال إلى تيليجرام"
             else:
-                return False, f"فشل الإرسال: {response.text}"
+                return False, f"فشل: {resp.text}"
     except Exception as e:
-        return False, f"خطأ: {str(e)}"
+        return False, str(e)
 
 def telegram_get_latest_db():
-    token = st.session_state.get('telegram_bot_token', '')
-    chat_id = st.session_state.get('telegram_chat_id', '')
-    file_id = st.session_state.get('telegram_file_id', '')
+    token = st.session_state.telegram_bot_token
+    chat_id = st.session_state.telegram_chat_id
+    file_id = st.session_state.telegram_file_id
     if not token or not chat_id:
         return False, "يرجى إدخال بيانات تيليجرام أولاً"
     if not file_id:
-        return False, "لا يوجد ملف محفوظ في تيليجرام، قم بالرفع أولاً"
+        return False, "لا يوجد ملف محفوظ، ارفع أولاً"
     try:
-        file_info_url = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
-        file_resp = requests.get(file_info_url).json()
-        if not file_resp.get('ok'):
-            return False, "فشل جلب معلومات الملف"
-        file_path = file_resp['result']['file_path']
+        info_url = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
+        resp = requests.get(info_url).json()
+        if not resp.get('ok'): return False, "فشل جلب معلومات الملف"
+        file_path = resp['result']['file_path']
         download_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
-        db_response = requests.get(download_url)
-        if db_response.status_code == 200:
-            with open(DB_NAME, 'wb') as f:
-                f.write(db_response.content)
-            return True, "تم تنزيل قاعدة البيانات من تيليجرام بنجاح"
+        db_resp = requests.get(download_url)
+        if db_resp.status_code == 200:
+            with open(DB_NAME,'wb') as f: f.write(db_resp.content)
+            return True, "تم تنزيل قاعدة البيانات من تيليجرام"
         else:
-            return False, "فشل تنزيل الملف"
+            return False, "فشل التنزيل"
     except Exception as e:
-        return False, f"خطأ: {str(e)}"
+        return False, str(e)
 
-# ======================== دالة إعادة حساب الأرصدة ========================
-def recalculate_all_balances():
-    conn = get_db()
-    items = conn.execute("SELECT id FROM items").fetchall()
-    for item in items:
-        total_in = conn.execute("SELECT COALESCE(SUM(qty),0) FROM transactions WHERE item_id=? AND transaction_type IN ('وارد','تسوية إضافة')", (item['id'],)).fetchone()[0]
-        total_out = conn.execute("SELECT COALESCE(SUM(qty),0) FROM transactions WHERE item_id=? AND transaction_type IN ('صادر','تسوية عجز')", (item['id'],)).fetchone()[0]
-        new_balance = total_in - total_out
-        conn.execute("UPDATE items SET current_balance = ?, last_updated = ? WHERE id = ?", (new_balance, date.today().isoformat(), item['id']))
-    conn.commit()
-    conn.close()
-    return True
+# ======================== بدء التشغيل ========================
+init_db()
 
-# ======================== بدء التشغيل والاستعادة التلقائية ========================
-# محاولة استعادة تلقائية إذا كانت قاعدة البيانات مفقودة
 if st.session_state.telegram_bot_token and st.session_state.telegram_chat_id and st.session_state.telegram_file_id:
     if not os.path.exists(DB_NAME):
         success, msg = telegram_get_latest_db()
         if success:
-            st.success("✅ تم استعادة قاعدة البيانات من تيليجرام تلقائيًا")
+            st.success("تم استعادة قاعدة البيانات من تيليجرام تلقائيًا")
             recalculate_all_balances()
-        else:
-            st.warning(msg)
-
-init_db()
 
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
@@ -506,40 +466,32 @@ if not st.session_state.logged_in:
             else: st.error("خطأ")
     st.stop()
 
-# ======================== الواجهة الرئيسية بدون شريط جانبي ========================
 st.title(f"🧹 {st.session_state.store_name}")
 if st.session_state.logo_path and os.path.exists(st.session_state.logo_path):
     st.image(st.session_state.logo_path, width=150)
 st.write(f"مرحباً {st.session_state.user['full_name']} ({st.session_state.user['role']})")
-if st.button("تسجيل الخروج"):
-    logout()
+if st.button("تسجيل الخروج"): logout()
 
 with st.expander("⚙️ الإعدادات", expanded=False):
     new_font_size = st.slider("حجم الخط (%)", 50, 200, st.session_state.font_size, step=10, key="global_font")
     theme_color = st.color_picker("لون البرنامج", st.session_state.theme_color, key="global_theme")
     new_store_name = st.text_input("اسم المستودع", value=st.session_state.store_name, key="store_name_input")
-    if st.button("تحديث الاسم", key="update_name"):
-        if new_store_name.strip():
-            st.session_state.store_name = new_store_name.strip()
-            st.success("✅ تم تحديث اسم المستودع")
-            save_app_config({
-                'font_size': st.session_state.font_size,
-                'theme_color': st.session_state.theme_color,
-                'logo_path': st.session_state.logo_path,
-                'store_name': st.session_state.store_name,
-                'telegram_bot_token': st.session_state.telegram_bot_token,
-                'telegram_chat_id': st.session_state.telegram_chat_id,
-                'telegram_file_id': st.session_state.telegram_file_id
-            })
-            st.rerun()
-        else:
-            st.error("الاسم لا يمكن أن يكون فارغاً")
-    uploaded_logo = st.file_uploader("📷 رفع شعار", type=["png","jpg","jpeg"], key="logo_uploader")
+    if st.button("تحديث الاسم"):
+        st.session_state.store_name = new_store_name
+        save_app_config({
+            'font_size': st.session_state.font_size,
+            'theme_color': st.session_state.theme_color,
+            'logo_path': st.session_state.logo_path,
+            'store_name': st.session_state.store_name,
+            'telegram_bot_token': st.session_state.telegram_bot_token,
+            'telegram_chat_id': st.session_state.telegram_chat_id,
+            'telegram_file_id': st.session_state.telegram_file_id
+        })
+        st.rerun()
+    uploaded_logo = st.file_uploader("رفع شعار", type=["png","jpg","jpeg"])
     if uploaded_logo is not None:
-        with open(LOGO_FILE, "wb") as f:
-            f.write(uploaded_logo.getbuffer())
+        with open(LOGO_FILE,"wb") as f: f.write(uploaded_logo.getbuffer())
         st.session_state.logo_path = LOGO_FILE
-        st.success("✅ تم رفع الشعار بنجاح")
         save_app_config({
             'font_size': st.session_state.font_size,
             'theme_color': st.session_state.theme_color,
@@ -551,10 +503,9 @@ with st.expander("⚙️ الإعدادات", expanded=False):
         })
         st.rerun()
     if st.session_state.logo_path and os.path.exists(st.session_state.logo_path):
-        if st.button("🗑️ مسح الشعار"):
+        if st.button("مسح الشعار"):
             os.remove(st.session_state.logo_path)
             st.session_state.logo_path = None
-            st.success("تم مسح الشعار")
             save_app_config({
                 'font_size': st.session_state.font_size,
                 'theme_color': st.session_state.theme_color,
@@ -580,11 +531,11 @@ with st.expander("⚙️ الإعدادات", expanded=False):
         st.rerun()
 
     st.subheader("📱 إعداد تيليجرام")
-    st.text_input("Bot Token", key="telegram_bot_token_input", value=st.session_state.telegram_bot_token, type="password")
-    st.text_input("Chat ID", key="telegram_chat_id_input", value=st.session_state.telegram_chat_id)
-    if st.button("💾 حفظ بيانات تيليجرام", key="save_telegram"):
-        st.session_state.telegram_bot_token = st.session_state.telegram_bot_token_input
-        st.session_state.telegram_chat_id = st.session_state.telegram_chat_id_input
+    token_input = st.text_input("Bot Token", value=st.session_state.telegram_bot_token, type="password", key="tg_token")
+    chat_input = st.text_input("Chat ID", value=st.session_state.telegram_chat_id, key="tg_chat")
+    if st.button("💾 حفظ بيانات تيليجرام"):
+        st.session_state.telegram_bot_token = token_input
+        st.session_state.telegram_chat_id = chat_input
         save_app_config({
             'font_size': st.session_state.font_size,
             'theme_color': st.session_state.theme_color,
@@ -594,7 +545,7 @@ with st.expander("⚙️ الإعدادات", expanded=False):
             'telegram_chat_id': st.session_state.telegram_chat_id,
             'telegram_file_id': st.session_state.telegram_file_id
         })
-        st.success("✅ تم حفظ بيانات تيليجرام بنجاح")
+        st.success("تم حفظ بيانات تيليجرام")
 
 menu = []
 if check_perm():
@@ -608,22 +559,7 @@ elif has_role('disbursement'):
 elif has_role('supervisor'):
     menu = ["📊 لوحة التحكم","📝 الجرد","📈 التقارير"]
 
-choice = st.selectbox("القائمة", menu, index=0)
-
-def apply_table_styling(font_scale, bg_color):
-    return f"""<style>
-        div[data-testid="stDataFrame"] div[data-testid="stTable"] {{ font-size: {font_scale}% !important; }}
-        div[data-testid="stDataFrame"] table {{ background-color: {bg_color} !important; }}
-    </style>"""
-
-def column_selector(label, all_columns, default_order, key):
-    if key not in st.session_state:
-        st.session_state[key] = default_order
-    new_order = st.multiselect(label, options=all_columns, default=st.session_state[key], key=key+"_multiselect")
-    if new_order != st.session_state[key]:
-        st.session_state[key] = new_order
-        st.rerun()
-    return st.session_state[key]
+choice = st.selectbox("القائمة", menu)
 
 # ======================== الصفحات ========================
 if choice == "📊 لوحة التحكم":
@@ -1657,7 +1593,6 @@ elif choice == "📈 التقارير":
             df_disp = df[ordered + remaining]
             st.dataframe(df_disp, use_container_width=True)
             st.markdown(apply_table_styling(font_scale2, bg2), unsafe_allow_html=True)
-            # نضيف التاريخ في عنوان التقرير عند الطباعة
             report_title = f"تقرير الأرصدة - {date.today().strftime('%Y-%m-%d')}"
             export_buttons(df_disp, "ارصدة", report_title)
         else:
