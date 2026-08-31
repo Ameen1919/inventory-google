@@ -19,7 +19,6 @@ import requests
 # ======================== إعدادات الصفحة ========================
 st.set_page_config(page_title="مخزن النظافة", layout="wide", initial_sidebar_state="collapsed")
 
-# ======================== إدارة الحالة العامة والإعدادات الدائمة ========================
 APP_CONFIG_FILE = 'app_config.json'
 
 def load_app_config():
@@ -32,7 +31,8 @@ def load_app_config():
         'logo_path': None,
         'store_name': "مخزن النظافة",
         'telegram_bot_token': "",
-        'telegram_chat_id': ""
+        'telegram_chat_id': "",
+        'telegram_file_id': ""
     }
 
 def save_app_config(config):
@@ -41,6 +41,7 @@ def save_app_config(config):
 
 saved_config = load_app_config()
 
+# ======================== تحميل الإعدادات في session_state ========================
 if 'font_size' not in st.session_state:
     st.session_state.font_size = saved_config.get('font_size', 100)
 if 'theme_color' not in st.session_state:
@@ -53,6 +54,8 @@ if 'telegram_bot_token' not in st.session_state:
     st.session_state.telegram_bot_token = saved_config.get('telegram_bot_token', "")
 if 'telegram_chat_id' not in st.session_state:
     st.session_state.telegram_chat_id = saved_config.get('telegram_chat_id', "")
+if 'telegram_file_id' not in st.session_state:
+    st.session_state.telegram_file_id = saved_config.get('telegram_file_id', "")
 
 def apply_theme():
     st.markdown(f"""
@@ -277,6 +280,10 @@ def generate_pdf(title, df, cols_map=None):
             v = str(row[col]) if pd.notnull(row[col]) else '-'
             pdf.cell(widths[i],8, shape_arabic(v), border=1, align='C')
         pdf.ln()
+    # إضافة تاريخ ووقت الطباعة أسفل التقرير
+    pdf.ln(5)
+    pdf.set_font("Amiri", size=10) if font_path else pdf.set_font("Helvetica", size=10)
+    pdf.cell(0, 8, shape_arabic(f"تاريخ الطباعة: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"), ln=True, align='L')
     return bytes(pdf.output())
 
 def export_buttons(df, prefix, pdf_title=None):
@@ -401,19 +408,6 @@ def save_attachment(uploaded_file, transaction_id):
     with open(file_path, "wb") as f: f.write(uploaded_file.getbuffer())
     return safe_name
 
-# ======================== دالة إعادة حساب الأرصدة ========================
-def recalculate_all_balances():
-    conn = get_db()
-    items = conn.execute("SELECT id FROM items").fetchall()
-    for item in items:
-        total_in = conn.execute("SELECT COALESCE(SUM(qty),0) FROM transactions WHERE item_id=? AND transaction_type IN ('وارد','تسوية إضافة')", (item['id'],)).fetchone()[0]
-        total_out = conn.execute("SELECT COALESCE(SUM(qty),0) FROM transactions WHERE item_id=? AND transaction_type IN ('صادر','تسوية عجز')", (item['id'],)).fetchone()[0]
-        new_balance = total_in - total_out
-        conn.execute("UPDATE items SET current_balance = ?, last_updated = ? WHERE id = ?", (new_balance, date.today().isoformat(), item['id']))
-    conn.commit()
-    conn.close()
-    return True
-
 # ======================== دوال تيليجرام ========================
 def telegram_send_document(file_path, caption=""):
     token = st.session_state.get('telegram_bot_token', '')
@@ -427,6 +421,19 @@ def telegram_send_document(file_path, caption=""):
             data = {'chat_id': chat_id, 'caption': caption}
             response = requests.post(url, files=files, data=data)
             if response.status_code == 200:
+                result = response.json().get('result', {})
+                file_id = result.get('document', {}).get('file_id')
+                if file_id:
+                    st.session_state.telegram_file_id = file_id
+                    save_app_config({
+                        'font_size': st.session_state.font_size,
+                        'theme_color': st.session_state.theme_color,
+                        'logo_path': st.session_state.logo_path,
+                        'store_name': st.session_state.store_name,
+                        'telegram_bot_token': st.session_state.telegram_bot_token,
+                        'telegram_chat_id': st.session_state.telegram_chat_id,
+                        'telegram_file_id': st.session_state.telegram_file_id
+                    })
                 return True, "تم الإرسال إلى تيليجرام بنجاح"
             else:
                 return False, f"فشل الإرسال: {response.text}"
@@ -436,33 +443,52 @@ def telegram_send_document(file_path, caption=""):
 def telegram_get_latest_db():
     token = st.session_state.get('telegram_bot_token', '')
     chat_id = st.session_state.get('telegram_chat_id', '')
+    file_id = st.session_state.get('telegram_file_id', '')
     if not token or not chat_id:
         return False, "يرجى إدخال بيانات تيليجرام أولاً"
-    url = f"https://api.telegram.org/bot{token}/getUpdates"
+    if not file_id:
+        return False, "لا يوجد ملف محفوظ في تيليجرام، قم بالرفع أولاً"
     try:
-        response = requests.get(url)
-        if response.status_code != 200:
-            return False, f"فشل جلب التحديثات: {response.text}"
-        updates = response.json().get('result', [])
-        for update in reversed(updates):
-            if 'document' in update.get('message', {}):
-                file_name = update['message']['document'].get('file_name')
-                if file_name == DB_NAME:
-                    file_id = update['message']['document']['file_id']
-                    file_path = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
-                    file_resp = requests.get(file_path).json()
-                    if file_resp.get('ok'):
-                        download_url = f"https://api.telegram.org/file/bot{token}/{file_resp['result']['file_path']}"
-                        db_response = requests.get(download_url)
-                        if db_response.status_code == 200:
-                            with open(DB_NAME, 'wb') as f:
-                                f.write(db_response.content)
-                            return True, "تم تنزيل قاعدة البيانات من تيليجرام"
-        return False, "لم يتم العثور على نسخة احتياطية في تيليجرام"
+        file_info_url = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
+        file_resp = requests.get(file_info_url).json()
+        if not file_resp.get('ok'):
+            return False, "فشل جلب معلومات الملف"
+        file_path = file_resp['result']['file_path']
+        download_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+        db_response = requests.get(download_url)
+        if db_response.status_code == 200:
+            with open(DB_NAME, 'wb') as f:
+                f.write(db_response.content)
+            return True, "تم تنزيل قاعدة البيانات من تيليجرام بنجاح"
+        else:
+            return False, "فشل تنزيل الملف"
     except Exception as e:
         return False, f"خطأ: {str(e)}"
 
-# ======================== بدء التشغيل ========================
+# ======================== دالة إعادة حساب الأرصدة ========================
+def recalculate_all_balances():
+    conn = get_db()
+    items = conn.execute("SELECT id FROM items").fetchall()
+    for item in items:
+        total_in = conn.execute("SELECT COALESCE(SUM(qty),0) FROM transactions WHERE item_id=? AND transaction_type IN ('وارد','تسوية إضافة')", (item['id'],)).fetchone()[0]
+        total_out = conn.execute("SELECT COALESCE(SUM(qty),0) FROM transactions WHERE item_id=? AND transaction_type IN ('صادر','تسوية عجز')", (item['id'],)).fetchone()[0]
+        new_balance = total_in - total_out
+        conn.execute("UPDATE items SET current_balance = ?, last_updated = ? WHERE id = ?", (new_balance, date.today().isoformat(), item['id']))
+    conn.commit()
+    conn.close()
+    return True
+
+# ======================== بدء التشغيل والاستعادة التلقائية ========================
+# محاولة استعادة تلقائية إذا كانت قاعدة البيانات مفقودة
+if st.session_state.telegram_bot_token and st.session_state.telegram_chat_id and st.session_state.telegram_file_id:
+    if not os.path.exists(DB_NAME):
+        success, msg = telegram_get_latest_db()
+        if success:
+            st.success("✅ تم استعادة قاعدة البيانات من تيليجرام تلقائيًا")
+            recalculate_all_balances()
+        else:
+            st.warning(msg)
+
 init_db()
 
 if 'logged_in' not in st.session_state:
@@ -502,7 +528,8 @@ with st.expander("⚙️ الإعدادات", expanded=False):
                 'logo_path': st.session_state.logo_path,
                 'store_name': st.session_state.store_name,
                 'telegram_bot_token': st.session_state.telegram_bot_token,
-                'telegram_chat_id': st.session_state.telegram_chat_id
+                'telegram_chat_id': st.session_state.telegram_chat_id,
+                'telegram_file_id': st.session_state.telegram_file_id
             })
             st.rerun()
         else:
@@ -519,7 +546,8 @@ with st.expander("⚙️ الإعدادات", expanded=False):
             'logo_path': st.session_state.logo_path,
             'store_name': st.session_state.store_name,
             'telegram_bot_token': st.session_state.telegram_bot_token,
-            'telegram_chat_id': st.session_state.telegram_chat_id
+            'telegram_chat_id': st.session_state.telegram_chat_id,
+            'telegram_file_id': st.session_state.telegram_file_id
         })
         st.rerun()
     if st.session_state.logo_path and os.path.exists(st.session_state.logo_path):
@@ -533,7 +561,8 @@ with st.expander("⚙️ الإعدادات", expanded=False):
                 'logo_path': st.session_state.logo_path,
                 'store_name': st.session_state.store_name,
                 'telegram_bot_token': st.session_state.telegram_bot_token,
-                'telegram_chat_id': st.session_state.telegram_chat_id
+                'telegram_chat_id': st.session_state.telegram_chat_id,
+                'telegram_file_id': st.session_state.telegram_file_id
             })
             st.rerun()
     if new_font_size != st.session_state.font_size or theme_color != st.session_state.theme_color:
@@ -545,11 +574,11 @@ with st.expander("⚙️ الإعدادات", expanded=False):
             'logo_path': st.session_state.logo_path,
             'store_name': st.session_state.store_name,
             'telegram_bot_token': st.session_state.telegram_bot_token,
-            'telegram_chat_id': st.session_state.telegram_chat_id
+            'telegram_chat_id': st.session_state.telegram_chat_id,
+            'telegram_file_id': st.session_state.telegram_file_id
         })
         st.rerun()
 
-    # إعداد تيليجرام
     st.subheader("📱 إعداد تيليجرام")
     st.text_input("Bot Token", key="telegram_bot_token_input", value=st.session_state.telegram_bot_token, type="password")
     st.text_input("Chat ID", key="telegram_chat_id_input", value=st.session_state.telegram_chat_id)
@@ -562,7 +591,8 @@ with st.expander("⚙️ الإعدادات", expanded=False):
             'logo_path': st.session_state.logo_path,
             'store_name': st.session_state.store_name,
             'telegram_bot_token': st.session_state.telegram_bot_token,
-            'telegram_chat_id': st.session_state.telegram_chat_id
+            'telegram_chat_id': st.session_state.telegram_chat_id,
+            'telegram_file_id': st.session_state.telegram_file_id
         })
         st.success("✅ تم حفظ بيانات تيليجرام بنجاح")
 
