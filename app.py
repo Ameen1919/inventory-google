@@ -18,7 +18,6 @@ import base64
 # ======================== إعدادات الصفحة ========================
 st.set_page_config(page_title="مخزن النظافة", layout="wide", initial_sidebar_state="collapsed")
 
-# ======================== إدارة الحالة العامة والإعدادات الدائمة ========================
 APP_CONFIG_FILE = 'app_config.json'
 
 def load_app_config():
@@ -337,14 +336,12 @@ def create_backup(typ="يدوي",notes=""):
         return False, None, str(e)
 
 def restore_backup(zip_path):
-    """استعادة نسخة احتياطية مع إعادة حساب الأرصدة تلقائياً"""
     try:
         try:
             conn = sqlite3.connect(DB_NAME)
             conn.close()
         except:
             pass
-
         tmp = "tmp_res"
         if os.path.exists(tmp): shutil.rmtree(tmp)
         os.makedirs(tmp)
@@ -396,28 +393,23 @@ def save_attachment(uploaded_file, transaction_id):
     with open(file_path, "wb") as f: f.write(uploaded_file.getbuffer())
     return safe_name
 
-# ======================== مزامنة Google Drive (JSON مباشرة) ========================
+# ======================== مزامنة Google Drive (مع رفع ملف JSON) ========================
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
-import json
 
 def get_drive_service():
-    """إنشاء عميل Drive باستخدام بيانات credentials من secrets"""
+    """إنشاء عميل Drive باستخدام ملف JSON (من الرفع أو من المجلد)"""
     try:
-        creds_dict = {
-            "type": st.secrets["google"]["type"],
-            "project_id": st.secrets["google"]["project_id"],
-            "private_key_id": st.secrets["google"]["private_key_id"],
-            "private_key": st.secrets["google"]["private_key"].replace('\\n', '\n'),
-            "client_email": st.secrets["google"]["client_email"],
-            "client_id": st.secrets["google"]["client_id"],
-            "auth_uri": st.secrets["google"]["auth_uri"],
-            "token_uri": st.secrets["google"]["token_uri"],
-            "auth_provider_x509_cert_url": st.secrets["google"]["auth_provider_x509_cert_url"],
-            "client_x509_cert_url": st.secrets["google"]["client_x509_cert_url"],
-            "universe_domain": st.secrets["google"]["universe_domain"]
-        }
+        if 'uploaded_service_account' in st.session_state:
+            creds_dict = st.session_state.uploaded_service_account
+        else:
+            creds_path = os.path.join(os.getcwd(), "service_account.json")
+            if not os.path.exists(creds_path):
+                return None
+            with open(creds_path, 'r') as f:
+                creds_dict = json.load(f)
+
         credentials = service_account.Credentials.from_service_account_info(
             creds_dict,
             scopes=['https://www.googleapis.com/auth/drive']
@@ -429,14 +421,13 @@ def get_drive_service():
         return None
 
 def upload_db_to_drive():
-    """رفع قاعدة البيانات إلى Drive"""
     if not os.path.exists(DB_NAME):
         return False
     drive = get_drive_service()
     if not drive:
         return False
     try:
-        folder_id = st.secrets["drive"]["folder_id"]
+        folder_id = st.secrets.get("drive", {}).get("folder_id", "1OtygNhfyQe_cRKsDdAI-_8dbGJMPfMld")
         query = f"name='{DB_NAME}' and '{folder_id}' in parents and trashed=false"
         results = drive.files().list(q=query, fields='files(id)').execute()
         files = results.get('files', [])
@@ -451,12 +442,11 @@ def upload_db_to_drive():
         return False
 
 def download_db_from_drive():
-    """تحميل قاعدة البيانات من Drive"""
     drive = get_drive_service()
     if not drive:
         return False
     try:
-        folder_id = st.secrets["drive"]["folder_id"]
+        folder_id = st.secrets.get("drive", {}).get("folder_id", "1OtygNhfyQe_cRKsDdAI-_8dbGJMPfMld")
         query = f"name='{DB_NAME}' and '{folder_id}' in parents and trashed=false"
         results = drive.files().list(q=query, fields='files(id, name)').execute()
         files = results.get('files', [])
@@ -475,21 +465,18 @@ def download_db_from_drive():
         return False
 
 def sync_db_if_needed():
-    """استعادة قاعدة البيانات من Drive إذا كانت مفقودة محلياً"""
     if not os.path.exists(DB_NAME):
-        if st.secrets.get("drive") and st.secrets.get("google"):
-            if download_db_from_drive():
-                recalculate_all_balances()
-                st.success("✅ تم استعادة البيانات من Google Drive وإعادة حساب الأرصدة.")
-                return True
-            else:
-                st.warning("⚠️ لم يتم العثور على نسخة احتياطية في Drive. سيتم إنشاء قاعدة بيانات جديدة.")
-                return True
+        if download_db_from_drive():
+            recalculate_all_balances()
+            st.success("✅ تم استعادة البيانات من Google Drive وإعادة حساب الأرصدة.")
+            return True
+        else:
+            st.warning("⚠️ لم يتم العثور على نسخة احتياطية في Drive. سيتم إنشاء قاعدة بيانات جديدة.")
+            return True
     return False
 
 # ======================== دالة إعادة حساب الأرصدة ========================
 def recalculate_all_balances():
-    """إعادة حساب current_balance لكل صنف بناءً على جميع الحركات المسجلة"""
     conn = get_db()
     items = conn.execute("SELECT id FROM items").fetchall()
     for item in items:
@@ -503,7 +490,7 @@ def recalculate_all_balances():
 
 # ======================== بدء التشغيل ========================
 init_db()
-if st.secrets.get("google") and st.secrets.get("drive"):
+if os.path.exists("service_account.json") or ('uploaded_service_account' in st.session_state):
     sync_db_if_needed()
 
 if 'logged_in' not in st.session_state:
@@ -596,7 +583,6 @@ elif has_role('supervisor'):
 
 choice = st.selectbox("القائمة", menu, index=0)
 
-# ======================== دوال مساعدة للجداول القابلة للتخصيص ========================
 def apply_table_styling(font_scale, bg_color):
     return f"""<style>
         div[data-testid="stDataFrame"] div[data-testid="stTable"] {{ font-size: {font_scale}% !important; }}
@@ -1696,7 +1682,19 @@ elif choice == "💾 النسخ الاحتياطي":
             else:
                 st.error(msg)
 
-    if st.secrets.get("google") and st.secrets.get("drive"):
+    # قسم إعداد Google Drive
+    st.divider()
+    st.subheader("⚙️ إعداد Google Drive (اختياري)")
+    uploaded_credentials = st.file_uploader("📤 ارفع ملف service_account.json", type="json")
+    if uploaded_credentials is not None:
+        try:
+            creds_dict = json.load(uploaded_credentials)
+            st.session_state.uploaded_service_account = creds_dict
+            st.success("✅ تم تحميل ملف بيانات الاعتماد بنجاح")
+        except:
+            st.error("❌ الملف غير صالح")
+
+    if st.session_state.get('uploaded_service_account') or os.path.exists("service_account.json"):
         st.divider()
         st.subheader("☁️ مزامنة مع Google Drive")
         if st.button("📤 رفع قاعدة البيانات الآن إلى Drive"):
@@ -1705,8 +1703,7 @@ elif choice == "💾 النسخ الاحتياطي":
             else:
                 st.error("❌ فشل الرفع. تأكد من إعدادات secrets.")
     else:
-        st.divider()
-        st.info("ℹ️ للحصول على نسخ احتياطية تلقائية، يمكنك إعداد Google Drive من خلال ملف secrets.")
+        st.info("ℹ️ يمكنك رفع ملف service_account.json لتفعيل المزامنة مع Google Drive.")
 
 elif choice == "👥 المستخدمين":
     if not has_role('super_admin'): st.error("غير مصرح"); st.stop()
