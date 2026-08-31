@@ -395,10 +395,14 @@ def telegram_send_document(file_path, caption=""):
     chat_id = st.session_state.telegram_chat_id
     if not token or not chat_id:
         return False, "يرجى إدخال بيانات تيليجرام أولاً"
+    # إنشاء نسخة احتياطية zip
+    ok, backup_path, msg = create_backup("تيليجرام", caption)
+    if not ok:
+        return False, msg
     url = f"https://api.telegram.org/bot{token}/sendDocument"
     try:
-        with open(file_path,'rb') as f:
-            resp = requests.post(url, files={'document':f}, data={'chat_id':chat_id,'caption':caption})
+        with open(backup_path, 'rb') as f:
+            resp = requests.post(url, files={'document': f}, data={'chat_id': chat_id, 'caption': caption})
             if resp.status_code == 200:
                 file_id = resp.json().get('result',{}).get('document',{}).get('file_id')
                 if file_id:
@@ -412,7 +416,7 @@ def telegram_send_document(file_path, caption=""):
                         'telegram_chat_id': st.session_state.telegram_chat_id,
                         'telegram_file_id': st.session_state.telegram_file_id
                     })
-                return True, "تم الإرسال إلى تيليجرام"
+                return True, "تم إرسال النسخة الاحتياطية إلى تيليجرام"
             else:
                 return False, f"فشل: {resp.text}"
     except Exception as e:
@@ -434,8 +438,15 @@ def telegram_get_latest_db():
         download_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
         db_resp = requests.get(download_url)
         if db_resp.status_code == 200:
-            with open(DB_NAME,'wb') as f: f.write(db_resp.content)
-            return True, "تم تنزيل قاعدة البيانات من تيليجرام"
+            temp_zip = "temp_telegram_backup.zip"
+            with open(temp_zip, 'wb') as f:
+                f.write(db_resp.content)
+            success, msg = restore_backup(temp_zip)
+            os.remove(temp_zip)
+            if success:
+                return True, "تمت الاستعادة من تيليجرام بنجاح"
+            else:
+                return False, msg
         else:
             return False, "فشل التنزيل"
     except Exception as e:
