@@ -34,10 +34,12 @@ def load_app_config():
     if os.path.exists(APP_CONFIG_FILE):
         with open(APP_CONFIG_FILE, 'r', encoding='utf-8') as f:
             config.update(json.load(f))
+    # قراءة من secrets.toml إن وجدت (لها الأولوية)
     try:
         if 'telegram' in st.secrets:
             config['telegram_bot_token'] = st.secrets['telegram']['bot_token']
             config['telegram_chat_id'] = st.secrets['telegram']['chat_id']
+            config['telegram_file_id'] = st.secrets['telegram'].get('file_id', "")
     except:
         pass
     return config
@@ -48,6 +50,7 @@ def save_app_config(config):
 
 saved_config = load_app_config()
 
+# تعيين القيم في st.session_state
 if 'font_size' not in st.session_state:
     st.session_state.font_size = saved_config.get('font_size', 100)
 if 'theme_color' not in st.session_state:
@@ -91,6 +94,7 @@ if not os.path.exists(BACKUP_FOLDER):
 if not os.path.exists(ATTACHMENTS_FOLDER):
     os.makedirs(ATTACHMENTS_FOLDER)
 
+# ======================== دوال مساعدة ========================
 def hash_password(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
 
@@ -215,6 +219,7 @@ def check_perm(role=None):
 def has_role(role):
     return st.session_state.get('user',{}).get('role')==role
 
+# ======================== PDF عربي ========================
 def get_arabic_font():
     path = "Amiri-Regular.ttf"
     if not os.path.exists(path):
@@ -295,6 +300,7 @@ def generate_outward_order_number():
         last_num = 1
     return f"OUT-{today_str}-{last_num:04d}"
 
+# ======================== النسخ الاحتياطي ========================
 def load_backup_config():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE,'r',encoding='utf-8') as f: return json.load(f)
@@ -390,6 +396,7 @@ def recalculate_all_balances():
         conn.execute("UPDATE items SET current_balance=? WHERE id=?",(tin-tout,item['id']))
     conn.commit(); conn.close()
 
+# ======================== تيليجرام ========================
 def telegram_send_document(file_path, caption=""):
     token = st.session_state.telegram_bot_token
     chat_id = st.session_state.telegram_chat_id
@@ -469,6 +476,7 @@ def column_selector(label, all_columns, default_order, key):
 # ======================== بدء التشغيل ========================
 init_db()
 
+# استعادة تلقائية إذا كانت قاعدة البيانات مفقودة وتم ضبط تيليجرام
 if st.session_state.telegram_bot_token and st.session_state.telegram_chat_id and st.session_state.telegram_file_id:
     if not os.path.exists(DB_NAME):
         success, msg = telegram_get_latest_db()
@@ -491,6 +499,7 @@ if not st.session_state.logged_in:
             else: st.error("خطأ")
     st.stop()
 
+# ======================== الواجهة الرئيسية ========================
 st.title(f"🧹 {st.session_state.store_name}")
 if st.session_state.logo_path and os.path.exists(st.session_state.logo_path):
     st.image(st.session_state.logo_path, width=150)
@@ -558,9 +567,11 @@ with st.expander("⚙️ الإعدادات", expanded=False):
     st.subheader("📱 إعداد تيليجرام")
     token_input = st.text_input("Bot Token", value=st.session_state.telegram_bot_token, type="password", key="tg_token")
     chat_input = st.text_input("Chat ID", value=st.session_state.telegram_chat_id, key="tg_chat")
+    file_id_input = st.text_input("File ID (اختياري، يُحفظ للاستعادة الدائمة)", value=st.session_state.telegram_file_id, key="tg_file_id")
     if st.button("💾 حفظ بيانات تيليجرام"):
         st.session_state.telegram_bot_token = token_input
         st.session_state.telegram_chat_id = chat_input
+        st.session_state.telegram_file_id = file_id_input
         save_app_config({
             'font_size': st.session_state.font_size,
             'theme_color': st.session_state.theme_color,
@@ -572,6 +583,7 @@ with st.expander("⚙️ الإعدادات", expanded=False):
         })
         st.success("تم حفظ بيانات تيليجرام")
 
+# ======================== القائمة ========================
 menu = []
 if check_perm():
     menu = ["📊 لوحة التحكم","📦 إدارة الأصناف","📏 الوحدات","🏨 الفنادق","🏢 الموردين",
@@ -584,7 +596,7 @@ elif has_role('disbursement'):
 elif has_role('supervisor'):
     menu = ["📊 لوحة التحكم","📝 الجرد","📈 التقارير"]
 
-choice = st.selectbox("القائمة", menu)
+choice = st.selectbox("القائمة", menu, index=0)
 
 # ======================== الصفحات ========================
 if choice == "📊 لوحة التحكم":
@@ -1676,6 +1688,8 @@ elif choice == "💾 النسخ الاحتياطي":
         success, msg = telegram_send_document(DB_NAME, caption=f"نسخة احتياطية {datetime.now().strftime('%Y-%m-%d %H:%M')}")
         if success:
             st.success(msg)
+            st.info(f"📎 معرّف الملف (File ID) الحالي: `{st.session_state.telegram_file_id}`")
+            st.write("انسخ هذا المعرّف واحفظه في مكان آمن أو ضعه في secrets.toml للحفاظ عليه بعد إعادة التشغيل.")
         else:
             st.error(msg)
     if st.button("⬇️ استعادة قاعدة البيانات من تيليجرام"):
