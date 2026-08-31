@@ -19,6 +19,7 @@ import requests
 # ======================== إعدادات الصفحة ========================
 st.set_page_config(page_title="مخزن النظافة", layout="wide", initial_sidebar_state="collapsed")
 
+# ======================== إدارة الحالة العامة والإعدادات الدائمة ========================
 APP_CONFIG_FILE = 'app_config.json'
 
 def load_app_config():
@@ -415,8 +416,8 @@ def recalculate_all_balances():
 
 # ======================== دوال تيليجرام ========================
 def telegram_send_document(file_path, caption=""):
-    token = st.session_state.telegram_bot_token
-    chat_id = st.session_state.telegram_chat_id
+    token = st.session_state.get('telegram_bot_token', '')
+    chat_id = st.session_state.get('telegram_chat_id', '')
     if not token or not chat_id:
         return False, "يرجى إدخال بيانات تيليجرام أولاً"
     url = f"https://api.telegram.org/bot{token}/sendDocument"
@@ -433,8 +434,8 @@ def telegram_send_document(file_path, caption=""):
         return False, f"خطأ: {str(e)}"
 
 def telegram_get_latest_db():
-    token = st.session_state.telegram_bot_token
-    chat_id = st.session_state.telegram_chat_id
+    token = st.session_state.get('telegram_bot_token', '')
+    chat_id = st.session_state.get('telegram_chat_id', '')
     if not token or not chat_id:
         return False, "يرجى إدخال بيانات تيليجرام أولاً"
     url = f"https://api.telegram.org/bot{token}/getUpdates"
@@ -443,18 +444,15 @@ def telegram_get_latest_db():
         if response.status_code != 200:
             return False, f"فشل جلب التحديثات: {response.text}"
         updates = response.json().get('result', [])
-        # نبحث عن آخر رسالة تحتوي على مستند باسم DB_NAME
         for update in reversed(updates):
             if 'document' in update.get('message', {}):
                 file_name = update['message']['document'].get('file_name')
                 if file_name == DB_NAME:
                     file_id = update['message']['document']['file_id']
-                    # الحصول على مسار الملف
                     file_path = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
                     file_resp = requests.get(file_path).json()
                     if file_resp.get('ok'):
                         download_url = f"https://api.telegram.org/file/bot{token}/{file_resp['result']['file_path']}"
-                        # تنزيل الملف
                         db_response = requests.get(download_url)
                         if db_response.status_code == 200:
                             with open(DB_NAME, 'wb') as f:
@@ -482,7 +480,7 @@ if not st.session_state.logged_in:
             else: st.error("خطأ")
     st.stop()
 
-# ======================== الواجهة الرئيسية ========================
+# ======================== الواجهة الرئيسية بدون شريط جانبي ========================
 st.title(f"🧹 {st.session_state.store_name}")
 if st.session_state.logo_path and os.path.exists(st.session_state.logo_path):
     st.image(st.session_state.logo_path, width=150)
@@ -553,8 +551,20 @@ with st.expander("⚙️ الإعدادات", expanded=False):
 
     # إعداد تيليجرام
     st.subheader("📱 إعداد تيليجرام")
-    st.session_state.telegram_bot_token = st.text_input("Bot Token", value=st.session_state.telegram_bot_token, type="password")
-    st.session_state.telegram_chat_id = st.text_input("Chat ID", value=st.session_state.telegram_chat_id)
+    st.text_input("Bot Token", key="telegram_bot_token_input", value=st.session_state.telegram_bot_token, type="password")
+    st.text_input("Chat ID", key="telegram_chat_id_input", value=st.session_state.telegram_chat_id)
+    if st.button("💾 حفظ بيانات تيليجرام", key="save_telegram"):
+        st.session_state.telegram_bot_token = st.session_state.telegram_bot_token_input
+        st.session_state.telegram_chat_id = st.session_state.telegram_chat_id_input
+        save_app_config({
+            'font_size': st.session_state.font_size,
+            'theme_color': st.session_state.theme_color,
+            'logo_path': st.session_state.logo_path,
+            'store_name': st.session_state.store_name,
+            'telegram_bot_token': st.session_state.telegram_bot_token,
+            'telegram_chat_id': st.session_state.telegram_chat_id
+        })
+        st.success("✅ تم حفظ بيانات تيليجرام بنجاح")
 
 menu = []
 if check_perm():
@@ -570,7 +580,6 @@ elif has_role('supervisor'):
 
 choice = st.selectbox("القائمة", menu, index=0)
 
-# ======================== دوال مساعدة للجداول ========================
 def apply_table_styling(font_scale, bg_color):
     return f"""<style>
         div[data-testid="stDataFrame"] div[data-testid="stTable"] {{ font-size: {font_scale}% !important; }}
@@ -613,9 +622,1036 @@ if choice == "📊 لوحة التحكم":
     conn.close()
 
 elif choice == "📦 إدارة الأصناف":
-    # ... (باقي الصفحات مطابقة للكود السابق، مع الحفاظ على كل الوظائف)
-    # لتوفير المساحة، لن أكررها هنا، لكن يجب نسخها كما هي من الكود السابق.
-    pass
+    if not check_perm(): st.error("غير مصرح"); st.stop()
+    st.header("إدارة الأصناف")
+    conn = get_db()
+
+    units = conn.execute("SELECT id, unit_name, unit_symbol FROM units").fetchall()
+    unit_options = [f"{u['unit_name']} ({u['unit_symbol']})" for u in units]
+    unit_dict = {opt: u['id'] for opt, u in zip(unit_options, units)}
+    unit_id_to_text = {u['id']: f"{u['unit_name']} ({u['unit_symbol']})" for u in units}
+
+    show_inactive = st.checkbox("إظهار الأصناف غير النشطة", value=False)
+    condition = "" if show_inactive else "WHERE is_active = 1"
+
+    items = conn.execute(f"SELECT id, item_code, name, unit_id, current_balance, min_qty, max_qty, is_active, notes FROM items {condition} ORDER BY name").fetchall()
+
+    data = []
+    for it in items:
+        data.append({
+            "id": it["id"],
+            "item_code": it["item_code"],
+            "name": it["name"],
+            "unit_text": unit_id_to_text.get(it["unit_id"], unit_options[0]),
+            "current_balance": it["current_balance"],
+            "min_qty": it["min_qty"],
+            "max_qty": it["max_qty"],
+            "is_active": bool(it["is_active"]),
+            "notes": it["notes"],
+            "delete": False
+        })
+
+    df = pd.DataFrame(data)
+
+    if 'edited_df' not in st.session_state:
+        st.session_state.edited_df = df.copy()
+    if 'redo_df' not in st.session_state:
+        st.session_state.redo_df = None
+
+    if st.session_state.edited_df is not None:
+        df = st.session_state.edited_df.copy()
+    else:
+        st.session_state.edited_df = df.copy()
+
+    edited_df = st.data_editor(
+        df,
+        column_config={
+            "id": st.column_config.NumberColumn("المعرف", disabled=True),
+            "item_code": st.column_config.TextColumn("الكود", disabled=True),
+            "name": st.column_config.TextColumn("اسم الصنف", required=True),
+            "unit_text": st.column_config.SelectboxColumn("الوحدة", options=unit_options),
+            "current_balance": st.column_config.NumberColumn("الرصيد الحالي", disabled=True),
+            "min_qty": st.column_config.NumberColumn("الحد الأدنى", min_value=0.0, step=0.1),
+            "max_qty": st.column_config.NumberColumn("الحد الأقصى", min_value=0.0, step=0.1),
+            "is_active": st.column_config.CheckboxColumn("نشط"),
+            "notes": st.column_config.TextColumn("ملاحظات"),
+            "delete": st.column_config.CheckboxColumn("حذف")
+        },
+        disabled=["id", "item_code", "current_balance"],
+        hide_index=True,
+        num_rows="dynamic",
+        key="items_editor"
+    )
+
+    st.session_state.edited_df = edited_df.copy()
+
+    col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
+    with col_btn1:
+        if st.button("💾 حفظ جميع التعديلات", type="primary"):
+            with conn:
+                ids_to_delete = edited_df[edited_df["delete"] == True]["id"].dropna().astype(int).tolist()
+                for item_id in ids_to_delete:
+                    trans_count = conn.execute("SELECT COUNT(*) FROM transactions WHERE item_id=?", (item_id,)).fetchone()[0]
+                    if trans_count > 0:
+                        st.warning(f"الصنف رقم {item_id} لا يمكن حذفه لوجود حركات مرتبطة.")
+                    else:
+                        conn.execute("DELETE FROM expiry_alerts WHERE item_id=?", (item_id,))
+                        conn.execute("DELETE FROM inventory_counts WHERE item_id=?", (item_id,))
+                        conn.execute("DELETE FROM items WHERE id=?", (item_id,))
+
+                for _, row in edited_df.iterrows():
+                    if pd.isna(row["id"]):
+                        if pd.isna(row["name"]) or str(row["name"]).strip() == "":
+                            continue
+                        exists = conn.execute("SELECT id FROM items WHERE name=? AND is_active=1", (row["name"].strip(),)).fetchone()
+                        if exists:
+                            st.warning(f"الصنف '{row['name']}' موجود مسبقاً، تم تخطيه.")
+                            continue
+                        unit_id = unit_dict.get(row["unit_text"], units[0]["id"])
+                        code = f"ITM-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                        conn.execute("INSERT INTO items (item_code, name, unit_id, min_qty, max_qty, current_balance, is_active, notes, created_date, last_updated) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                                     (code, row["name"].strip(), unit_id, row["min_qty"], row["max_qty"],
+                                      0.0, int(row["is_active"]), row.get("notes", ""),
+                                      date.today().isoformat(), date.today().isoformat()))
+                    else:
+                        item_id = int(row["id"])
+                        unit_id = unit_dict.get(row["unit_text"], units[0]["id"])
+                        new_name = row["name"].strip() if pd.notna(row["name"]) else ""
+                        if new_name == "":
+                            continue
+                        duplicate = conn.execute("SELECT id FROM items WHERE name=? AND id!=? AND is_active=1", (new_name, item_id)).fetchone()
+                        if duplicate:
+                            st.warning(f"الاسم '{new_name}' موجود بالفعل لصنف آخر، لم يتم تحديث الصنف {item_id}.")
+                            continue
+                        conn.execute("""UPDATE items SET name=?, unit_id=?, min_qty=?, max_qty=?, is_active=?, notes=?, last_updated=?
+                                      WHERE id=?""",
+                                     (new_name, unit_id, row["min_qty"], row["max_qty"],
+                                      int(row["is_active"]), row.get("notes", ""),
+                                      date.today().isoformat(), item_id))
+
+            conn.commit()
+            st.success("تم حفظ التعديلات بنجاح")
+            items_updated = conn.execute(f"SELECT id, item_code, name, unit_id, current_balance, min_qty, max_qty, is_active, notes FROM items {condition} ORDER BY name").fetchall()
+            new_data = []
+            for it in items_updated:
+                new_data.append({
+                    "id": it["id"],
+                    "item_code": it["item_code"],
+                    "name": it["name"],
+                    "unit_text": unit_id_to_text.get(it["unit_id"], unit_options[0]),
+                    "current_balance": it["current_balance"],
+                    "min_qty": it["min_qty"],
+                    "max_qty": it["max_qty"],
+                    "is_active": bool(it["is_active"]),
+                    "notes": it["notes"],
+                    "delete": False
+                })
+            st.session_state.edited_df = pd.DataFrame(new_data)
+            st.session_state.redo_df = None
+            st.rerun()
+
+    with col_btn2:
+        if st.button("↩️ تراجع"):
+            st.session_state.redo_df = st.session_state.edited_df.copy()
+            items_orig = conn.execute(f"SELECT id, item_code, name, unit_id, current_balance, min_qty, max_qty, is_active, notes FROM items {condition} ORDER BY name").fetchall()
+            orig_data = []
+            for it in items_orig:
+                orig_data.append({
+                    "id": it["id"],
+                    "item_code": it["item_code"],
+                    "name": it["name"],
+                    "unit_text": unit_id_to_text.get(it["unit_id"], unit_options[0]),
+                    "current_balance": it["current_balance"],
+                    "min_qty": it["min_qty"],
+                    "max_qty": it["max_qty"],
+                    "is_active": bool(it["is_active"]),
+                    "notes": it["notes"],
+                    "delete": False
+                })
+            st.session_state.edited_df = pd.DataFrame(orig_data)
+            st.rerun()
+
+    with col_btn3:
+        if st.button("↪️ تقديم"):
+            if st.session_state.redo_df is not None:
+                st.session_state.edited_df = st.session_state.redo_df.copy()
+                st.session_state.redo_df = None
+                st.rerun()
+            else:
+                st.info("لا توجد تعديلات متراجع عنها لتقديمها")
+
+    with col_btn4:
+        if st.button("🔄 إعادة تحميل البيانات"):
+            st.session_state.edited_df = None
+            st.session_state.redo_df = None
+            st.rerun()
+
+    st.divider()
+    if st.button("🔁 إعادة حساب جميع الأرصدة (من الحركات)"):
+        with st.spinner("جاري إعادة حساب الأرصدة..."):
+            recalculate_all_balances()
+        st.success("تمت إعادة حساب جميع الأرصدة بنجاح. الأرصدة الآن مطابقة للحركات الفعلية.")
+        st.rerun()
+
+    with st.expander("📥 استيراد من Excel"):
+        uploaded_file = st.file_uploader("اختر ملف Excel أو CSV", type=["xlsx", "csv"], key="excel_upload")
+        if uploaded_file:
+            try:
+                if uploaded_file.name.endswith('.csv'):
+                    df_excel = pd.read_csv(uploaded_file)
+                else:
+                    df_excel = pd.read_excel(uploaded_file)
+                st.dataframe(df_excel.head())
+
+                col_map = {
+                    'اسم الصنف': ['اسم الصنف', 'الصنف', 'name', 'item'],
+                    'الوحدة': ['الوحدة', 'وحدة', 'unit'],
+                    'الحد الأدنى': ['الحد الأدنى', 'حد أدنى', 'min'],
+                    'الحد الأقصى': ['الحد الأقصى', 'حد أقصى', 'max'],
+                    'الرصيد': ['الرصيد', 'الرصيد الافتتاحي', 'balance', 'current'],
+                    'صلاحية': ['صلاحية', 'مدة الصلاحية', 'shelf_life'],
+                    'ملاحظات': ['ملاحظات', 'notes']
+                }
+                def find_col(col_list, df_cols):
+                    for c in col_list:
+                        if c in df_cols:
+                            return c
+                    return None
+
+                name_col = find_col(col_map['اسم الصنف'], df_excel.columns)
+                unit_col = find_col(col_map['الوحدة'], df_excel.columns)
+                min_col = find_col(col_map['الحد الأدنى'], df_excel.columns)
+                max_col = find_col(col_map['الحد الأقصى'], df_excel.columns)
+                bal_col = find_col(col_map['الرصيد'], df_excel.columns)
+                shelf_col = find_col(col_map['صلاحية'], df_excel.columns)
+                notes_col = find_col(col_map['ملاحظات'], df_excel.columns)
+
+                if name_col is None:
+                    st.error("❌ لم يتم العثور على عمود 'اسم الصنف' في الملف.")
+                else:
+                    if st.button("بدء الاستيراد", key="start_import"):
+                        units_list = conn.execute("SELECT id, unit_name, unit_symbol FROM units").fetchall()
+                        unit_dict_excel = {u['unit_name']: u['id'] for u in units_list}
+                        unit_dict_excel.update({u['unit_symbol']: u['id'] for u in units_list})
+                        default_unit_id = units_list[0]['id'] if units_list else 1
+
+                        imported = 0
+                        skipped = 0
+                        errors = []
+                        for idx, row in df_excel.iterrows():
+                            try:
+                                item_name = str(row[name_col]).strip()
+                                if not item_name:
+                                    continue
+                                exists = conn.execute("SELECT id FROM items WHERE name=? AND is_active=1", (item_name,)).fetchone()
+                                if exists:
+                                    skipped += 1
+                                    continue
+
+                                unit_id = default_unit_id
+                                if unit_col and pd.notnull(row[unit_col]):
+                                    unit_val = str(row[unit_col]).strip()
+                                    if unit_val in unit_dict_excel:
+                                        unit_id = unit_dict_excel[unit_val]
+
+                                min_qty = float(row[min_col]) if min_col and pd.notnull(row[min_col]) else 10.0
+                                max_qty = float(row[max_col]) if max_col and pd.notnull(row[max_col]) else 100.0
+                                current_balance = float(row[bal_col]) if bal_col and pd.notnull(row[bal_col]) else 0.0
+                                shelf_life = int(row[shelf_col]) if shelf_col and pd.notnull(row[shelf_col]) else 365
+                                notes = str(row[notes_col]) if notes_col and pd.notnull(row[notes_col]) else ""
+
+                                code = f"ITM-{datetime.now().strftime('%Y%m%d%H%M%S')}-{imported+skipped+1}"
+                                conn.execute("INSERT INTO items (item_code, name, unit_id, min_qty, max_qty, current_balance, shelf_life_days, notes, created_date, last_updated) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                                             (code, item_name, unit_id, min_qty, max_qty, current_balance, shelf_life, notes, date.today().isoformat(), date.today().isoformat()))
+                                conn.commit()
+                                imported += 1
+                            except sqlite3.IntegrityError:
+                                skipped += 1
+                            except Exception as e:
+                                errors.append(f"صف {idx+2}: {str(e)}")
+
+                        if imported > 0:
+                            st.success(f"✅ تم استيراد {imported} صنف بنجاح.")
+                        if skipped > 0:
+                            st.info(f"ℹ️ تم تخطي {skipped} صنف لأن أسمائها موجودة مسبقاً.")
+                        if errors:
+                            st.warning("بعض الأخطاء: " + "; ".join(errors[:5]))
+                        st.session_state.edited_df = None
+                        st.rerun()
+            except Exception as e:
+                st.error(f"❌ فشل قراءة الملف: {str(e)}")
+    conn.close()
+
+elif choice == "📏 الوحدات":
+    if not check_perm(): st.error("غير مصرح"); st.stop()
+    st.header("وحدات القياس")
+    conn = get_db()
+    tab1, tab2 = st.tabs(["➕ إضافة وحدة", "✏️ تعديل الوحدات"])
+    with tab1:
+        with st.form("add_unit"):
+            un = st.text_input("اسم الوحدة")
+            us = st.text_input("الرمز")
+            if st.form_submit_button("إضافة"):
+                if un:
+                    conn.execute("INSERT OR IGNORE INTO units (unit_name, unit_symbol) VALUES (?,?)",(un,us))
+                    conn.commit()
+                    st.success("تم الحفظ بنجاح")
+                    st.rerun()
+    with tab2:
+        units = conn.execute("SELECT id, unit_name, unit_symbol FROM units").fetchall()
+        if units:
+            df_units = pd.DataFrame(units, columns=['م','الوحدة','الرمز'])
+            edited_units = st.data_editor(df_units, num_rows="dynamic", key="units_editor", use_container_width=True)
+            if st.button("💾 حفظ تعديلات الوحدات", key="save_units"):
+                with conn:
+                    for _, row in edited_units.iterrows():
+                        if pd.notna(row['م']):
+                            conn.execute("UPDATE units SET unit_name=?, unit_symbol=? WHERE id=?", (row['الوحدة'], row['الرمز'], int(row['م'])))
+                        else:
+                            if pd.notna(row['الوحدة']) and str(row['الوحدة']).strip():
+                                conn.execute("INSERT OR IGNORE INTO units (unit_name, unit_symbol) VALUES (?,?)", (row['الوحدة'], row['الرمز']))
+                conn.commit()
+                st.success("تم حفظ التعديلات بنجاح")
+                st.rerun()
+        else:
+            st.info("لا توجد وحدات")
+    if st.button("🔄 إعادة تحميل الصفحة", key="reload_units"):
+        st.rerun()
+    conn.close()
+
+elif choice == "🏨 الفنادق":
+    if not check_perm(): st.error("غير مصرح"); st.stop()
+    st.header("الفنادق")
+    conn = get_db()
+    tab1, tab2 = st.tabs(["إضافة","تعديل"])
+    with tab1:
+        with st.form("add_hotel"):
+            name = st.text_input("اسم الفندق")
+            contact = st.text_input("الشخص المسؤول")
+            phone = st.text_input("الهاتف")
+            if st.form_submit_button("إضافة"):
+                conn.execute("INSERT OR IGNORE INTO hotels (name,contact_person,phone) VALUES (?,?,?)",(name,contact,phone))
+                conn.commit()
+                st.success("تم الحفظ بنجاح")
+                st.rerun()
+    with tab2:
+        hotels = conn.execute("SELECT * FROM hotels").fetchall()
+        if hotels:
+            hotel_names = [h['name'] for h in hotels]
+            selected = st.selectbox("اختر الفندق", hotel_names)
+            h = [h for h in hotels if h['name']==selected][0]
+            new_name = st.text_input("الاسم الجديد", value=h['name'])
+            new_contact = st.text_input("الشخص المسؤول", value=h['contact_person'] or "")
+            new_phone = st.text_input("الهاتف", value=h['phone'] or "")
+            if st.button("حفظ التعديلات"):
+                if new_name and new_name != selected:
+                    exists = conn.execute("SELECT id FROM hotels WHERE name=? AND id!=?",(new_name,h['id'])).fetchone()
+                    if exists: st.error("الاسم موجود")
+                    else:
+                        conn.execute("UPDATE hotels SET name=?, contact_person=?, phone=? WHERE id=?",(new_name, new_contact, new_phone, h['id']))
+                        conn.commit()
+                        st.success("تم الحفظ بنجاح"); st.rerun()
+                else:
+                    conn.execute("UPDATE hotels SET name=?, contact_person=?, phone=? WHERE id=?",(new_name, new_contact, new_phone, h['id']))
+                    conn.commit()
+                    st.success("تم الحفظ بنجاح"); st.rerun()
+        else: st.info("لا توجد فنادق")
+    if st.button("🔄 إعادة تحميل الصفحة", key="reload_hotels"):
+        st.rerun()
+    conn.close()
+
+elif choice == "🏢 الموردين":
+    if not check_perm(): st.error("غير مصرح"); st.stop()
+    st.header("الموردين")
+    conn = get_db()
+    tab1, tab2 = st.tabs(["إضافة","تعديل"])
+    with tab1:
+        with st.form("add_sup"):
+            name = st.text_input("اسم المورد")
+            info = st.text_input("معلومات الاتصال")
+            if st.form_submit_button("إضافة"):
+                conn.execute("INSERT OR IGNORE INTO suppliers (supplier_name,contact_info) VALUES (?,?)",(name,info))
+                conn.commit()
+                st.success("تم الحفظ بنجاح"); st.rerun()
+    with tab2:
+        supps = conn.execute("SELECT * FROM suppliers").fetchall()
+        if supps:
+            supp_names = [s['supplier_name'] for s in supps]
+            selected = st.selectbox("اختر المورد", supp_names)
+            s = [s for s in supps if s['supplier_name']==selected][0]
+            new_name = st.text_input("الاسم الجديد", value=s['supplier_name'])
+            new_info = st.text_input("معلومات الاتصال", value=s['contact_info'] or "")
+            if st.button("حفظ التعديلات"):
+                if new_name and new_name != selected:
+                    exists = conn.execute("SELECT id FROM suppliers WHERE supplier_name=? AND id!=?",(new_name,s['id'])).fetchone()
+                    if exists: st.error("الاسم موجود")
+                    else:
+                        conn.execute("UPDATE suppliers SET supplier_name=?, contact_info=? WHERE id=?",(new_name, new_info, s['id']))
+                        conn.commit(); st.success("تم الحفظ بنجاح"); st.rerun()
+                else:
+                    conn.execute("UPDATE suppliers SET supplier_name=?, contact_info=? WHERE id=?",(new_name, new_info, s['id']))
+                    conn.commit(); st.success("تم الحفظ بنجاح"); st.rerun()
+        else: st.info("لا يوجد موردين")
+    if st.button("🔄 إعادة تحميل الصفحة", key="reload_suppliers"):
+        st.rerun()
+    conn.close()
+
+elif choice == "📥 الوارد":
+    tab_in1, tab_in2 = st.tabs(["📝 تسجيل مشتريات", "📋 سجل المشتريات"])
+    
+    with tab_in1:
+        st.subheader("تسجيل مشتريات جديدة")
+        conn = get_db()
+        items = conn.execute("SELECT id,name,unit_id FROM items WHERE is_active=1").fetchall()
+        suppliers = conn.execute("SELECT id, supplier_name FROM suppliers ORDER BY supplier_name").fetchall()
+        supplier_options = [s['supplier_name'] for s in suppliers]
+        if not supplier_options:
+            supplier_options = ["لا يوجد موردين مسجلين"]
+        
+        if items:
+            if 'inward_defaults' not in st.session_state:
+                st.session_state.inward_defaults = {
+                    'item': items[0]['name'] if items else "",
+                    'qty': 1.0,
+                    'supplier': supplier_options[0] if supplier_options else "",
+                    'unit_price': 0.0,
+                    'invoice_date': date.today(),
+                    'notes': "",
+                    'attachment': None
+                }
+            if 'inward_form_values' not in st.session_state:
+                st.session_state.inward_form_values = st.session_state.inward_defaults.copy()
+            
+            with st.form("inward"):
+                item = st.selectbox("الصنف", [i['name'] for i in items], 
+                                    index=[i['name'] for i in items].index(st.session_state.inward_form_values['item']) if st.session_state.inward_form_values['item'] in [i['name'] for i in items] else 0)
+                qty = st.number_input("الكمية",0.1,100000.0, st.session_state.inward_form_values['qty'])
+                supplier = st.selectbox("المورد", supplier_options, 
+                                        index=supplier_options.index(st.session_state.inward_form_values['supplier']) if st.session_state.inward_form_values['supplier'] in supplier_options else 0)
+                unit_price = st.number_input("سعر الوحدة", min_value=0.0, value=st.session_state.inward_form_values['unit_price'], step=0.01)
+                invoice_date = st.date_input("تاريخ الفاتورة", value=st.session_state.inward_form_values['invoice_date'])
+                notes = st.text_input("ملاحظات", value=st.session_state.inward_form_values['notes'])
+                uploaded_file = st.file_uploader("📎 إرفاق ملف (صورة أو PDF)", type=["png","jpg","jpeg","pdf"])
+                
+                col_submit, col_undo, col_redo = st.columns([2,1,1])
+                with col_submit:
+                    submitted = st.form_submit_button("تسجيل")
+                with col_undo:
+                    undo = st.form_submit_button("↩️ تراجع")
+                with col_redo:
+                    redo = st.form_submit_button("↪️ تقديم")
+                
+                if submitted:
+                    it = [i for i in items if i['name']==item][0]
+                    conn.execute("""INSERT INTO transactions (transaction_type,item_id,qty,unit_id,supplier_name,unit_price,expiry_date,transaction_date,notes,created_by)
+                                  VALUES (?,?,?,?,?,?,NULL,?,?,?)""",
+                                 ('وارد',it['id'],qty,it['unit_id'],supplier if supplier != "لا يوجد موردين مسجلين" else "", unit_price, invoice_date.isoformat(),notes,st.session_state.user['full_name']))
+                    trans_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                    if uploaded_file:
+                        att = save_attachment(uploaded_file, trans_id)
+                        conn.execute("UPDATE transactions SET attachment=? WHERE id=?", (att, trans_id))
+                    conn.execute("UPDATE items SET current_balance=current_balance+?, last_updated=? WHERE id=?",(qty,date.today().isoformat(),it['id']))
+                    conn.commit()
+                    st.success(f"تم الحفظ بنجاح (تاريخ الفاتورة: {invoice_date.isoformat()})")
+                    st.session_state.inward_defaults = {
+                        'item': item,
+                        'qty': qty,
+                        'supplier': supplier,
+                        'unit_price': unit_price,
+                        'invoice_date': invoice_date,
+                        'notes': notes,
+                        'attachment': uploaded_file
+                    }
+                    st.session_state.inward_form_values = st.session_state.inward_defaults.copy()
+                    st.rerun()
+                
+                if undo:
+                    st.session_state.inward_form_values = st.session_state.inward_defaults.copy()
+                    st.rerun()
+                
+                if redo:
+                    if 'inward_redo_values' in st.session_state:
+                        st.session_state.inward_form_values = st.session_state.inward_redo_values.copy()
+                        st.session_state.inward_redo_values = None
+                        st.rerun()
+                    else:
+                        st.info("لا توجد تعديلات متراجع عنها لتقديمها")
+        conn.close()
+    
+    with tab_in2:
+        st.subheader("سجل المشتريات")
+        conn = get_db()
+        
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            start_date = st.date_input("من تاريخ", date.today()-timedelta(days=30), key="in_start")
+        with col_f2:
+            end_date = st.date_input("إلى تاريخ", date.today(), key="in_end")
+        
+        inward_records = conn.execute("""
+            SELECT t.id, t.transaction_date, t.item_id, i.name as item_name, t.qty, u.unit_symbol, t.notes, t.attachment, t.supplier_name, t.unit_price
+            FROM transactions t
+            JOIN items i ON t.item_id = i.id
+            LEFT JOIN units u ON t.unit_id = u.id
+            WHERE t.transaction_type = 'وارد' 
+            AND t.transaction_date BETWEEN ? AND ?
+            ORDER BY t.id DESC
+        """, (start_date.isoformat(), end_date.isoformat())).fetchall()
+        
+        if inward_records:
+            for rec in inward_records:
+                with st.expander(f"📦 وارد #{rec['id']} - {rec['item_name']} ({rec['qty']} {rec['unit_symbol']}) - {rec['transaction_date']}"):
+                    col_det1, col_det2 = st.columns(2)
+                    with col_det1:
+                        st.write(f"**رقم الحركة:** {rec['id']}")
+                        st.write(f"**الصنف:** {rec['item_name']}")
+                        st.write(f"**الكمية:** {rec['qty']} {rec['unit_symbol']}")
+                        if rec['supplier_name']:
+                            st.write(f"**المورد:** {rec['supplier_name']}")
+                        if rec['unit_price']:
+                            st.write(f"**سعر الوحدة:** {rec['unit_price']:.2f}")
+                    with col_det2:
+                        st.write(f"**التاريخ:** {rec['transaction_date']}")
+                        st.write(f"**ملاحظات:** {rec['notes'] or 'لا يوجد'}")
+                    
+                    if rec['attachment']:
+                        att_path = os.path.join(ATTACHMENTS_FOLDER, rec['attachment'])
+                        if os.path.exists(att_path):
+                            file_ext = os.path.splitext(rec['attachment'])[1].lower()
+                            if file_ext in ['.jpg', '.jpeg', '.png']:
+                                st.image(att_path, caption="المرفق", width=300)
+                            elif file_ext == '.pdf':
+                                with open(att_path, "rb") as f:
+                                    st.download_button("📄 تحميل PDF المرفق", f, file_name=rec['attachment'])
+                            else:
+                                with open(att_path, "rb") as f:
+                                    st.download_button("📎 تحميل المرفق", f, file_name=rec['attachment'])
+                    
+                    col_btn_print, col_btn_edit, col_btn_delete = st.columns(3)
+                    with col_btn_print:
+                        if st.button(f"🖨️ طباعة #{rec['id']}", key=f"print_in_{rec['id']}"):
+                            font_path = get_arabic_font()
+                            pdf = FPDF()
+                            pdf.add_page()
+                            if font_path:
+                                pdf.add_font("Amiri", fname=font_path)
+                                pdf.set_font("Amiri", size=16)
+                            else:
+                                pdf.set_font("Helvetica", size=16)
+                            pdf.cell(0, 10, shape_arabic("إذن استلام مشتريات"), ln=True, align='C')
+                            pdf.ln(10)
+                            pdf.set_font("Amiri", size=12) if font_path else pdf.set_font("Helvetica", size=12)
+                            pdf.cell(0, 8, shape_arabic(f"رقم الإذن: IN-{rec['id']}"), ln=True, align='R')
+                            pdf.cell(0, 8, shape_arabic(f"التاريخ: {rec['transaction_date']}"), ln=True, align='R')
+                            pdf.cell(0, 8, shape_arabic(f"الصنف: {rec['item_name']}"), ln=True, align='R')
+                            pdf.cell(0, 8, shape_arabic(f"الكمية: {rec['qty']} {rec['unit_symbol']}"), ln=True, align='R')
+                            if rec['supplier_name']:
+                                pdf.cell(0, 8, shape_arabic(f"المورد: {rec['supplier_name']}"), ln=True, align='R')
+                            if rec['unit_price']:
+                                pdf.cell(0, 8, shape_arabic(f"سعر الوحدة: {rec['unit_price']:.2f}"), ln=True, align='R')
+                            pdf.cell(0, 8, shape_arabic(f"ملاحظات: {rec['notes'] or 'لا يوجد'}"), ln=True, align='R')
+                            pdf.ln(10)
+                            pdf.cell(0, 10, shape_arabic("توقيع أمين المخزن: ________________"), ln=True, align='R')
+                            
+                            pdf_bytes = bytes(pdf.output())
+                            st.download_button(f"📥 تحميل PDF الإذن #{rec['id']}", data=pdf_bytes,
+                                               file_name=f"Purchase_Order_{rec['id']}.pdf", mime="application/pdf")
+                    
+                    with col_btn_edit:
+                        if st.button(f"✏️ تعديل #{rec['id']}", key=f"edit_in_{rec['id']}"):
+                            st.session_state[f"editing_in_{rec['id']}"] = True
+                            st.rerun()
+                    
+                    with col_btn_delete:
+                        if st.button(f"🗑️ حذف #{rec['id']}", key=f"del_in_{rec['id']}"):
+                            if st.session_state.get(f"confirm_del_in_{rec['id']}", False):
+                                success, msg = delete_transaction(rec['id'])
+                                if success:
+                                    st.success(msg)
+                                    st.session_state[f"confirm_del_in_{rec['id']}"] = False
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
+                            else:
+                                st.session_state[f"confirm_del_in_{rec['id']}"] = True
+                                st.warning("⚠️ اضغط مرة أخرى لتأكيد الحذف (سيتم خصم الكمية من المخزون).")
+                                st.rerun()
+                    
+                    if st.session_state.get(f"editing_in_{rec['id']}", False):
+                        with st.form(key=f"edit_form_in_{rec['id']}"):
+                            st.markdown("---")
+                            st.subheader(f"تعديل الوارد #{rec['id']}")
+                            items_list = conn.execute("SELECT id, name, unit_id FROM items WHERE is_active=1").fetchall()
+                            current_item_index = [i['id'] for i in items_list].index(rec['item_id'])
+                            new_item = st.selectbox("الصنف", [i['name'] for i in items_list], index=current_item_index)
+                            new_qty = st.number_input("الكمية", min_value=0.1, value=float(rec['qty']))
+                            suppliers_list = conn.execute("SELECT id, supplier_name FROM suppliers ORDER BY supplier_name").fetchall()
+                            supplier_options_edit = [s['supplier_name'] for s in suppliers_list]
+                            current_supplier = rec['supplier_name'] if rec['supplier_name'] in supplier_options_edit else (supplier_options_edit[0] if supplier_options_edit else "")
+                            new_supplier = st.selectbox("المورد", supplier_options_edit, index=supplier_options_edit.index(current_supplier) if current_supplier else 0)
+                            new_unit_price = st.number_input("سعر الوحدة", min_value=0.0, value=float(rec['unit_price'] if rec['unit_price'] else 0.0), step=0.01)
+                            new_invoice_date = st.date_input("تاريخ الفاتورة", value=datetime.strptime(rec['transaction_date'], '%Y-%m-%d').date())
+                            new_notes = st.text_input("ملاحظات", value=rec['notes'] if rec['notes'] else "")
+                            new_attachment = st.file_uploader("📎 استبدال المرفق (اختياري)", type=["png","jpg","jpeg","pdf"])
+                            col_save, col_cancel = st.columns(2)
+                            with col_save:
+                                save_edit = st.form_submit_button("💾 حفظ التعديلات")
+                            with col_cancel:
+                                cancel_edit = st.form_submit_button("❌ إلغاء")
+                            
+                            if save_edit:
+                                old_item_id = rec['item_id']
+                                new_item_data = next((i for i in items_list if i['name'] == new_item), None)
+                                conn.execute("UPDATE items SET current_balance = current_balance - ?, last_updated=? WHERE id=?", (rec['qty'], date.today().isoformat(), old_item_id))
+                                conn.execute("UPDATE items SET current_balance = current_balance + ?, last_updated=? WHERE id=?", (new_qty, date.today().isoformat(), new_item_data['id']))
+                                attachment_name = rec['attachment']
+                                if new_attachment:
+                                    attachment_name = save_attachment(new_attachment, rec['id'])
+                                conn.execute("""UPDATE transactions SET item_id=?, qty=?, unit_id=?, supplier_name=?, unit_price=?, transaction_date=?, notes=?, attachment=?
+                                              WHERE id=?""",
+                                             (new_item_data['id'], new_qty, new_item_data['unit_id'], new_supplier, new_unit_price, new_invoice_date.isoformat(), new_notes, attachment_name, rec['id']))
+                                conn.commit()
+                                st.success("تم تعديل الوارد بنجاح")
+                                st.session_state[f"editing_in_{rec['id']}"] = False
+                                st.rerun()
+                            
+                            if cancel_edit:
+                                st.session_state[f"editing_in_{rec['id']}"] = False
+                                st.rerun()
+        else:
+            st.info("لا توجد مشتريات في هذه الفترة")
+        conn.close()
+
+elif choice == "📤 الصادر":
+    tab_out1, tab_out2 = st.tabs(["📝 إنشاء إذن صرف", "📋 سجل أذون الصرف"])
+    
+    with tab_out1:
+        st.subheader("إنشاء إذن صرف جديد")
+        conn = get_db()
+        items = conn.execute("SELECT id, name, current_balance, unit_id FROM items WHERE is_active=1").fetchall()
+        hotels = conn.execute("SELECT id, name, contact_person, phone FROM hotels").fetchall()
+        if not items or not hotels:
+            st.warning("يجب إضافة أصناف وفنادق أولاً")
+        else:
+            item_options = [f"{it['name']} (الرصيد: {it['current_balance']})" for it in items]
+            if 'outward_items' not in st.session_state:
+                st.session_state.outward_items = []
+            if 'outward_form_defaults' not in st.session_state:
+                st.session_state.outward_form_defaults = {
+                    'hotel': hotels[0]['name'],
+                    'recipient': hotels[0]['contact_person'] if hotels[0]['contact_person'] else "",
+                    'order_date': date.today(),
+                    'notes': ""
+                }
+            if 'outward_form_values' not in st.session_state:
+                st.session_state.outward_form_values = st.session_state.outward_form_defaults.copy()
+
+            st.subheader("إضافة أصناف للإذن")
+            col1, col2 = st.columns(2)
+            with col1:
+                selected_item_str = st.selectbox("الصنف", item_options, key="item_select")
+            with col2:
+                qty = st.number_input("الكمية", min_value=0.1, value=1.0, step=0.1, key="qty_input")
+
+            col_add, col_undo_items = st.columns(2)
+            with col_add:
+                if st.button("➕ أضف إلى الإذن"):
+                    if qty <= 0:
+                        st.error("الكمية يجب أن تكون أكبر من صفر")
+                    else:
+                        item_name = selected_item_str.split(" (الرصيد:")[0]
+                        it = next((i for i in items if i['name'] == item_name), None)
+                        if it:
+                            if qty > it['current_balance']:
+                                st.error(f"الرصيد غير كافٍ ({it['current_balance']})")
+                            else:
+                                st.session_state.outward_items.append({
+                                    'item_id': it['id'],
+                                    'item_name': it['name'],
+                                    'qty': qty,
+                                    'unit_id': it['unit_id']
+                                })
+                                st.success(f"تمت إضافة {item_name} ({qty})")
+                                st.rerun()
+            with col_undo_items:
+                if st.button("↩️ تراجع آخر إضافة"):
+                    if st.session_state.outward_items:
+                        removed = st.session_state.outward_items.pop()
+                        st.success(f"تم إزالة {removed['item_name']} من الإذن")
+                        st.rerun()
+                    else:
+                        st.info("لا توجد أصناف في القائمة")
+
+            if st.session_state.outward_items:
+                st.subheader("الأصناف في الإذن الحالي")
+                df_current = pd.DataFrame(st.session_state.outward_items)
+                units = conn.execute("SELECT id, unit_symbol FROM units").fetchall()
+                unit_dict_out = {u['id']: u['unit_symbol'] for u in units}
+                df_current['الوحدة'] = df_current['unit_id'].map(unit_dict_out)
+                df_display = df_current[['item_name', 'qty', 'الوحدة']].copy()
+                df_display.columns = ['الصنف', 'الكمية', 'الوحدة']
+                st.dataframe(df_display, use_container_width=True)
+
+                if st.button("🗑️ مسح القائمة"):
+                    st.session_state.outward_items = []
+                    st.rerun()
+
+                st.divider()
+                st.subheader("بيانات الإذن")
+                col_order1, col_order2 = st.columns(2)
+                with col_order1:
+                    hotel_names = [h['name'] for h in hotels]
+                    selected_hotel = st.selectbox("الفندق", hotel_names, 
+                                                  index=hotel_names.index(st.session_state.outward_form_values['hotel']) if st.session_state.outward_form_values['hotel'] in hotel_names else 0,
+                                                  key="hotel_select")
+                    current_hotel = next((h for h in hotels if h['name'] == selected_hotel), None)
+                    default_recipient = current_hotel['contact_person'] if current_hotel and current_hotel['contact_person'] else ""
+                with col_order2:
+                    recipient = st.text_input("اسم مسؤول الاستلام (للتوقيع)", 
+                                              value=st.session_state.outward_form_values['recipient'],
+                                              key="recipient")
+                    order_date = st.date_input("تاريخ الإذن", 
+                                               value=st.session_state.outward_form_values['order_date'],
+                                               key="order_date")
+                notes = st.text_area("ملاحظات الإذن", value=st.session_state.outward_form_values['notes'], key="notes")
+
+                col_submit, col_undo, col_redo = st.columns([2,1,1])
+                with col_submit:
+                    submitted = st.button("✅ تأكيد الصرف وإنشاء الإذن", type="primary")
+                with col_undo:
+                    undo = st.button("↩️ تراجع")
+                with col_redo:
+                    redo = st.button("↪️ تقديم")
+
+                if submitted:
+                    if not recipient:
+                        st.error("يرجى إدخال اسم مسؤول الاستلام")
+                    elif len(st.session_state.outward_items) == 0:
+                        st.error("لم تتم إضافة أي صنف")
+                    else:
+                        valid = True
+                        for item_entry in st.session_state.outward_items:
+                            it = conn.execute("SELECT current_balance FROM items WHERE id=?", (item_entry['item_id'],)).fetchone()
+                            if it['current_balance'] < item_entry['qty']:
+                                st.error(f"الرصيد غير كافٍ للصنف {item_entry['item_name']}")
+                                valid = False
+                                break
+                        if valid:
+                            order_number = generate_outward_order_number()
+                            hotel_id = current_hotel['id']
+                            conn.execute("""INSERT INTO outward_orders (order_number, hotel_id, recipient_name, order_date, notes, created_by)
+                                          VALUES (?,?,?,?,?,?)""",
+                                         (order_number, hotel_id, recipient, order_date.isoformat(), notes, st.session_state.user['full_name']))
+                            order_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+                            for item_entry in st.session_state.outward_items:
+                                conn.execute("""INSERT INTO transactions (transaction_type, item_id, hotel_id, qty, unit_id, transaction_date, notes, created_by, order_id)
+                                              VALUES (?,?,?,?,?,?,?,?,?)""",
+                                             ('صادر', item_entry['item_id'], hotel_id, item_entry['qty'], item_entry['unit_id'],
+                                              order_date.isoformat(), f"إذن رقم {order_number}", st.session_state.user['full_name'], order_id))
+                                conn.execute("UPDATE items SET current_balance = current_balance - ?, last_updated=? WHERE id=?",
+                                             (item_entry['qty'], date.today().isoformat(), item_entry['item_id']))
+
+                            conn.commit()
+                            st.success(f"تم الحفظ بنجاح (تاريخ الإذن: {order_date.isoformat()})")
+                            st.session_state.outward_form_defaults = {
+                                'hotel': selected_hotel,
+                                'recipient': recipient,
+                                'order_date': order_date,
+                                'notes': notes
+                            }
+                            st.session_state.outward_form_values = st.session_state.outward_form_defaults.copy()
+                            st.session_state.outward_items = []
+                            
+                            # طباعة PDF
+                            pdf_items = []
+                            for item_entry in st.session_state.outward_items:
+                                unit_symbol = unit_dict_out.get(item_entry['unit_id'], '')
+                                pdf_items.append([item_entry['item_name'], str(item_entry['qty']), unit_symbol])
+                            font_path = get_arabic_font()
+                            pdf = FPDF()
+                            pdf.add_page()
+                            if font_path:
+                                pdf.add_font("Amiri", fname=font_path)
+                                pdf.set_font("Amiri", size=16)
+                            else:
+                                pdf.set_font("Helvetica", size=16)
+                            pdf.cell(0, 10, shape_arabic("إذن صرف مخزني"), ln=True, align='C')
+                            pdf.ln(5)
+                            pdf.set_font("Amiri", size=12) if font_path else pdf.set_font("Helvetica", size=12)
+                            pdf.cell(0, 8, shape_arabic(f"رقم الإذن: {order_number}"), ln=True, align='R')
+                            pdf.cell(0, 8, shape_arabic(f"التاريخ: {order_date.isoformat()}"), ln=True, align='R')
+                            pdf.cell(0, 8, shape_arabic(f"الفندق: {selected_hotel}"), ln=True, align='R')
+                            pdf.cell(0, 8, shape_arabic(f"مسؤول الاستلام: {recipient}"), ln=True, align='R')
+                            pdf.ln(5)
+                            pdf.set_fill_color(0,168,107); pdf.set_text_color(255,255,255)
+                            pdf.cell(30, 10, shape_arabic("الوحدة"), border=1, fill=True, align='C')
+                            pdf.cell(30, 10, shape_arabic("الكمية"), border=1, fill=True, align='C')
+                            pdf.cell(100, 10, shape_arabic("الصنف"), border=1, fill=True, align='C')
+                            pdf.ln()
+                            pdf.set_text_color(0,0,0)
+                            pdf.set_font("Amiri", size=10) if font_path else pdf.set_font("Helvetica", size=10)
+                            for row in pdf_items:
+                                pdf.cell(30, 8, shape_arabic(row[2]), border=1, align='C')
+                                pdf.cell(30, 8, shape_arabic(row[1]), border=1, align='C')
+                                pdf.cell(100, 8, shape_arabic(row[0]), border=1, align='C')
+                                pdf.ln()
+                            pdf.ln(10)
+                            pdf.cell(0, 10, shape_arabic("توقيع مسؤول الاستلام: ________________"), ln=True, align='R')
+                            pdf.cell(0, 10, shape_arabic("توقيع أمين المخزن: ________________"), ln=True, align='R')
+
+                            pdf_bytes = bytes(pdf.output())
+                            st.download_button("📄 تحميل إذن الصرف PDF", data=pdf_bytes,
+                                               file_name=f"{order_number}.pdf", mime="application/pdf")
+
+                            st.rerun()
+
+                if undo:
+                    st.session_state.outward_form_values = st.session_state.outward_form_defaults.copy()
+                    st.rerun()
+
+                if redo:
+                    if 'outward_redo_values' in st.session_state:
+                        st.session_state.outward_form_values = st.session_state.outward_redo_values.copy()
+                        st.session_state.outward_redo_values = None
+                        st.rerun()
+                    else:
+                        st.info("لا توجد تعديلات متراجع عنها لتقديمها")
+        conn.close()
+    
+    with tab_out2:
+        st.subheader("سجل أذون الصرف")
+        conn = get_db()
+        
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            start_date = st.date_input("من تاريخ", date.today()-timedelta(days=30), key="out_start")
+        with col_f2:
+            end_date = st.date_input("إلى تاريخ", date.today(), key="out_end")
+        
+        orders = conn.execute("""
+            SELECT o.id, o.order_number, o.order_date, h.name as hotel_name, o.recipient_name, o.notes
+            FROM outward_orders o
+            JOIN hotels h ON o.hotel_id = h.id
+            WHERE o.order_date BETWEEN ? AND ?
+            ORDER BY o.id DESC
+        """, (start_date.isoformat(), end_date.isoformat())).fetchall()
+        
+        if orders:
+            for order in orders:
+                with st.expander(f"📋 إذن {order['order_number']} - {order['hotel_name']} - {order['order_date']}"):
+                    st.write(f"**رقم الإذن:** {order['order_number']}")
+                    st.write(f"**التاريخ:** {order['order_date']}")
+                    st.write(f"**الفندق:** {order['hotel_name']}")
+                    st.write(f"**مسؤول الاستلام:** {order['recipient_name']}")
+                    st.write(f"**ملاحظات:** {order['notes'] or 'لا يوجد'}")
+                    
+                    items_in_order = conn.execute("""
+                        SELECT i.name, t.qty, u.unit_symbol
+                        FROM transactions t
+                        JOIN items i ON t.item_id = i.id
+                        LEFT JOIN units u ON t.unit_id = u.id
+                        WHERE t.order_id = ? AND t.transaction_type = 'صادر'
+                    """, (order['id'],)).fetchall()
+                    
+                    if items_in_order:
+                        st.write("**الأصناف المصروفة:**")
+                        df_items = pd.DataFrame(items_in_order, columns=['الصنف', 'الكمية', 'الوحدة'])
+                        st.dataframe(df_items, use_container_width=True)
+                    
+                    col_btn_print, col_btn_delete = st.columns(2)
+                    with col_btn_print:
+                        if st.button(f"🖨️ طباعة PDF {order['order_number']}", key=f"print_out_{order['id']}"):
+                            font_path = get_arabic_font()
+                            pdf = FPDF()
+                            pdf.add_page()
+                            if font_path:
+                                pdf.add_font("Amiri", fname=font_path)
+                                pdf.set_font("Amiri", size=16)
+                            else:
+                                pdf.set_font("Helvetica", size=16)
+                            pdf.cell(0, 10, shape_arabic("إذن صرف مخزني"), ln=True, align='C')
+                            pdf.ln(5)
+                            pdf.set_font("Amiri", size=12) if font_path else pdf.set_font("Helvetica", size=12)
+                            pdf.cell(0, 8, shape_arabic(f"رقم الإذن: {order['order_number']}"), ln=True, align='R')
+                            pdf.cell(0, 8, shape_arabic(f"التاريخ: {order['order_date']}"), ln=True, align='R')
+                            pdf.cell(0, 8, shape_arabic(f"الفندق: {order['hotel_name']}"), ln=True, align='R')
+                            pdf.cell(0, 8, shape_arabic(f"مسؤول الاستلام: {order['recipient_name']}"), ln=True, align='R')
+                            pdf.ln(5)
+                            pdf.set_fill_color(0,168,107); pdf.set_text_color(255,255,255)
+                            pdf.cell(30, 10, shape_arabic("الوحدة"), border=1, fill=True, align='C')
+                            pdf.cell(30, 10, shape_arabic("الكمية"), border=1, fill=True, align='C')
+                            pdf.cell(100, 10, shape_arabic("الصنف"), border=1, fill=True, align='C')
+                            pdf.ln()
+                            pdf.set_text_color(0,0,0)
+                            pdf.set_font("Amiri", size=10) if font_path else pdf.set_font("Helvetica", size=10)
+                            for item in items_in_order:
+                                pdf.cell(30, 8, shape_arabic(item['unit_symbol']), border=1, align='C')
+                                pdf.cell(30, 8, shape_arabic(str(item['qty'])), border=1, align='C')
+                                pdf.cell(100, 8, shape_arabic(item['name']), border=1, align='C')
+                                pdf.ln()
+                            pdf.ln(10)
+                            pdf.cell(0, 10, shape_arabic(f"توقيع مسؤول الاستلام ({order['recipient_name']}): ________________"), ln=True, align='R')
+                            pdf.cell(0, 10, shape_arabic("توقيع أمين المخزن: ________________"), ln=True, align='R')
+                            
+                            pdf_bytes = bytes(pdf.output())
+                            st.download_button(f"📥 تحميل PDF {order['order_number']}", data=pdf_bytes,
+                                               file_name=f"{order['order_number']}.pdf", mime="application/pdf")
+                    with col_btn_delete:
+                        if st.button(f"🗑️ حذف الإذن {order['order_number']}", key=f"del_out_{order['id']}"):
+                            if st.session_state.get(f"confirm_del_out_{order['id']}", False):
+                                success, msg = delete_outward_order(order['id'])
+                                if success:
+                                    st.success(msg)
+                                    st.session_state[f"confirm_del_out_{order['id']}"] = False
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
+                            else:
+                                st.session_state[f"confirm_del_out_{order['id']}"] = True
+                                st.warning("⚠️ اضغط مرة أخرى لتأكيد الحذف (ستُعاد الكميات إلى المخزون).")
+                                st.rerun()
+        else:
+            st.info("لا توجد أذون صرف في هذه الفترة")
+        conn.close()
+
+elif choice == "📝 الجرد":
+    st.header("الجرد الدوري")
+    conn = get_db()
+    items = conn.execute("SELECT id,name,current_balance,unit_id FROM items WHERE is_active=1").fetchall()
+    if items:
+        item = st.selectbox("الصنف", [i['name'] for i in items])
+        it = [i for i in items if i['name']==item][0]
+        st.info(f"الرصيد المسجل: {it['current_balance']}")
+        actual = st.number_input("الكمية الفعلية", value=float(it['current_balance']), step=0.1, key="actual_qty")
+        notes = st.text_input("ملاحظات")
+        if st.button("حفظ الجرد"):
+            diff = actual - it['current_balance']
+            if diff != 0:
+                conn.execute("INSERT INTO transactions (transaction_type,item_id,qty,unit_id,transaction_date,notes,created_by) VALUES (?,?,?,?,?,?,?)",
+                             ('تسوية إضافة' if diff>0 else 'تسوية عجز', it['id'], abs(diff), it['unit_id'], date.today().isoformat(), notes, st.session_state.user['full_name']))
+                st.success(f"تم إضافة حركة {'تسوية إضافة' if diff>0 else 'تسوية عجز'} بمقدار {abs(diff)}.")
+            conn.execute("UPDATE items SET current_balance=?, last_updated=? WHERE id=?",(actual,date.today().isoformat(),it['id']))
+            conn.execute("INSERT INTO inventory_counts (count_date,item_id,expected_qty,actual_qty,difference,notes,counted_by) VALUES (?,?,?,?,?,?,?)",
+                         (date.today().isoformat(),it['id'],it['current_balance'],actual,diff,notes,st.session_state.user['full_name']))
+            conn.commit()
+            st.success("تم حفظ الجرد بنجاح")
+            st.info("💡 حركات التسوية تظهر في التقارير عند اختيار 'الكل' أو 'تسوية إضافة/عجز'.")
+            st.rerun()
+    conn.close()
+
+elif choice == "📈 التقارير":
+    st.header("التقارير")
+    conn = get_db()
+    tab1, tab2 = st.tabs(["حركات", "أرصدة"])
+    with tab1:
+        st.subheader("تقرير الحركات")
+        col1, col2, col3 = st.columns(3)
+        with col1: d1 = st.date_input("من", date.today()-timedelta(days=30))
+        with col2: d2 = st.date_input("إلى", date.today())
+        with col3: typ = st.selectbox("النوع",["الكل","وارد","صادر","تسوية إضافة","تسوية عجز"])
+        hotels = conn.execute("SELECT id, name FROM hotels").fetchall()
+        hotel_names = ["الكل"] + [h['name'] for h in hotels]
+        selected_hotel = st.selectbox("الفندق", hotel_names)
+        items_filter = conn.execute("SELECT id, name FROM items WHERE is_active=1").fetchall()
+        item_names = ["الكل"] + [it['name'] for it in items_filter]
+        selected_item = st.selectbox("الصنف", item_names)
+        
+        with st.expander("🎨 تنسيق الجدول"):
+            font_scale = st.slider("حجم الخط (%)", 50, 200, 100, step=10, key="report_font")
+            color_option = st.selectbox("لون الجدول", ["افتراضي","أخضر","أزرق","رمادي","برتقالي"], key="report_color")
+            color_map = {"افتراضي":"#f0f2f6","أخضر":"#e6ffe6","أزرق":"#e6f0ff","رمادي":"#f5f5f5","برتقالي":"#fff3e6"}
+            bg_color = color_map.get(color_option, "#f0f2f6")
+
+            all_columns = ['رقم الحركة','التاريخ','الصنف','النوع','الكمية','الوحدة','الفندق','المورد','سعر الوحدة','ملاحظات','مرفق']
+            cols_order = column_selector("اختر الأعمدة ورتبها", all_columns, ['رقم الحركة','التاريخ','الصنف','النوع','الكمية','الوحدة','الفندق','المورد','ملاحظات','مرفق'], "trans_cols")
+
+        query = """
+            SELECT t.id, t.transaction_date, i.name AS item_name, t.transaction_type, t.qty, u.unit_symbol,
+                   COALESCE(h.name, '-') AS hotel_name, t.supplier_name, t.unit_price, t.notes, t.attachment
+            FROM transactions t
+            JOIN items i ON t.item_id = i.id
+            LEFT JOIN hotels h ON t.hotel_id = h.id
+            LEFT JOIN units u ON t.unit_id = u.id
+            WHERE t.transaction_date BETWEEN ? AND ?
+        """
+        params = [d1.isoformat(), d2.isoformat()]
+        if typ != "الكل": query += " AND t.transaction_type = ?"; params.append(typ)
+        if selected_hotel != "الكل":
+            hotel_id = [h['id'] for h in hotels if h['name']==selected_hotel][0]
+            query += " AND t.hotel_id = ?"; params.append(hotel_id)
+        if selected_item != "الكل":
+            item_id = [it['id'] for it in items_filter if it['name']==selected_item][0]
+            query += " AND t.item_id = ?"; params.append(item_id)
+        query += " ORDER BY t.id DESC"
+        data = conn.execute(query, params).fetchall()
+        if data:
+            df = pd.DataFrame(data, columns=['رقم الحركة','التاريخ','الصنف','النوع','الكمية','الوحدة','الفندق','المورد','سعر الوحدة','ملاحظات','مرفق'])
+            def attachment_link(fname):
+                if fname and isinstance(fname, str) and fname.strip():
+                    path = os.path.join(ATTACHMENTS_FOLDER, fname)
+                    if os.path.exists(path):
+                        with open(path, "rb") as f:
+                            b64 = base64.b64encode(f.read()).decode()
+                        return f'<a href="data:application/octet-stream;base64,{b64}" download="{fname}">📎 تحميل</a>'
+                return ""
+            if 'مرفق' in df.columns:
+                df['مرفق'] = df['مرفق'].apply(attachment_link)
+            ordered = [c for c in cols_order if c in df.columns]
+            remaining = [c for c in df.columns if c not in ordered]
+            df_display = df[ordered + remaining]
+            st.dataframe(df_display, use_container_width=True)
+            st.markdown(apply_table_styling(font_scale, bg_color), unsafe_allow_html=True)
+            export_df = df.drop(columns=['مرفق'], errors='ignore')
+            export_df = export_df[[c for c in ordered if c in export_df.columns]]
+            export_buttons(export_df, "حركات", "تقرير الحركات")
+            
+            total_qty = df['الكمية'].sum()
+            st.markdown(f"**📊 إجمالي الكمية خلال الفترة:** `{total_qty}`")
+        else:
+            st.info("لا توجد حركات")
+    with tab2:
+        st.subheader("تقرير الأرصدة")
+        with st.expander("🎨 تنسيق جدول الأرصدة"):
+            font_scale2 = st.slider("حجم الخط (%)", 50,200,100,10, key="bal_font")
+            color_option2 = st.selectbox("لون الجدول", ["افتراضي","أخضر","أزرق","رمادي","برتقالي"], key="bal_color")
+            color_map2 = {"افتراضي":"#f0f2f6","أخضر":"#e6ffe6","أزرق":"#e6f0ff","رمادي":"#f5f5f5","برتقالي":"#fff3e6"}
+            bg2 = color_map2.get(color_option2,"#f0f2f6")
+            bal_cols = column_selector("اختر الأعمدة ورتبها (للأرصدة)", ['كود','الصنف','الرصيد','الوحدة'], ['كود','الصنف','الرصيد','الوحدة'], "bal_cols")
+
+        items = conn.execute("SELECT i.item_code, i.name, i.current_balance, u.unit_symbol FROM items i LEFT JOIN units u ON i.unit_id=u.id WHERE i.is_active=1").fetchall()
+        if items:
+            df = pd.DataFrame(items, columns=['كود','الصنف','الرصيد','الوحدة'])
+            ordered = [c for c in bal_cols if c in df.columns]
+            remaining = [c for c in df.columns if c not in ordered]
+            df_disp = df[ordered + remaining]
+            st.dataframe(df_disp, use_container_width=True)
+            st.markdown(apply_table_styling(font_scale2, bg2), unsafe_allow_html=True)
+            # نضيف التاريخ في عنوان التقرير عند الطباعة
+            report_title = f"تقرير الأرصدة - {date.today().strftime('%Y-%m-%d')}"
+            export_buttons(df_disp, "ارصدة", report_title)
+        else:
+            st.info("لا توجد أصناف نشطة")
+    conn.close()
+
+elif choice == "🗑️ إدارة الحركات (حذف)":
+    if not has_role('super_admin'): st.error("فقط المدير العام"); st.stop()
+    st.header("حذف حركة")
+    conn = get_db()
+    trans = conn.execute("""SELECT t.id, t.transaction_type, i.name, COALESCE(h.name,'-'), t.qty, t.transaction_date, t.notes
+                           FROM transactions t JOIN items i ON t.item_id=i.id LEFT JOIN hotels h ON t.hotel_id=h.id
+                           ORDER BY t.id DESC LIMIT 50""").fetchall()
+    if trans:
+        df = pd.DataFrame(trans, columns=['رقم','النوع','الصنف','الفندق','الكمية','التاريخ','ملاحظات'])
+        st.dataframe(df)
+        trans_id = st.number_input("أدخل رقم الحركة للحذف", min_value=1, step=1)
+        if st.button("حذف الحركة واسترجاع تأثيرها"):
+            ok, msg = delete_transaction(trans_id)
+            if ok: st.success(msg); st.rerun()
+            else: st.error(msg)
+    else:
+        st.info("لا توجد حركات")
+    conn.close()
 
 elif choice == "💾 النسخ الاحتياطي":
     st.header("النسخ الاحتياطي")
@@ -660,3 +1696,25 @@ elif choice == "💾 النسخ الاحتياطي":
             st.rerun()
         else:
             st.error(msg)
+
+elif choice == "👥 المستخدمين":
+    if not has_role('super_admin'): st.error("غير مصرح"); st.stop()
+    st.header("المستخدمين")
+    conn = get_db()
+    users = conn.execute("SELECT username, role, full_name FROM users").fetchall()
+    if users:
+        df = pd.DataFrame(users, columns=['مستخدم','دور','اسم'])
+        st.dataframe(df, use_container_width=True)
+    with st.form("add_user"):
+        un = st.text_input("اسم المستخدم")
+        pw = st.text_input("كلمة المرور", type="password")
+        fn = st.text_input("الاسم الكامل")
+        role = st.selectbox("الدور", ['super_admin','purchasing','disbursement','supervisor'])
+        if st.form_submit_button("إضافة"):
+            try:
+                conn.execute("INSERT INTO users (username,password,role,full_name) VALUES (?,?,?,?)",(un, hash_password(pw), role, fn))
+                conn.commit()
+                st.success("تم الحفظ بنجاح")
+                st.rerun()
+            except: st.error("مستخدم موجود")
+    conn.close()

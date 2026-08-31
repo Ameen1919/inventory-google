@@ -6,6 +6,4 @@ xlsxwriter>=3.0.0
 arabic-reshaper>=3.0.0
 python-bidi>=0.4.2
 Pillow
-google-api-python-client
-google-auth-httplib2
-google-auth-oauthlib
+requests
