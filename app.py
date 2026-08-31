@@ -395,14 +395,13 @@ def telegram_send_document(file_path, caption=""):
     chat_id = st.session_state.telegram_chat_id
     if not token or not chat_id:
         return False, "يرجى إدخال بيانات تيليجرام أولاً"
-    # إنشاء نسخة احتياطية zip
     ok, backup_path, msg = create_backup("تيليجرام", caption)
     if not ok:
         return False, msg
     url = f"https://api.telegram.org/bot{token}/sendDocument"
     try:
-        with open(backup_path, 'rb') as f:
-            resp = requests.post(url, files={'document': f}, data={'chat_id': chat_id, 'caption': caption})
+        with open(backup_path,'rb') as f:
+            resp = requests.post(url, files={'document':f}, data={'chat_id':chat_id,'caption':caption})
             if resp.status_code == 200:
                 file_id = resp.json().get('result',{}).get('document',{}).get('file_id')
                 if file_id:
@@ -439,8 +438,7 @@ def telegram_get_latest_db():
         db_resp = requests.get(download_url)
         if db_resp.status_code == 200:
             temp_zip = "temp_telegram_backup.zip"
-            with open(temp_zip, 'wb') as f:
-                f.write(db_resp.content)
+            with open(temp_zip,'wb') as f: f.write(db_resp.content)
             success, msg = restore_backup(temp_zip)
             os.remove(temp_zip)
             if success:
@@ -451,6 +449,22 @@ def telegram_get_latest_db():
             return False, "فشل التنزيل"
     except Exception as e:
         return False, str(e)
+
+# ======================== دوال مساعدة للجداول ========================
+def apply_table_styling(font_scale, bg_color):
+    return f"""<style>
+        div[data-testid="stDataFrame"] div[data-testid="stTable"] {{ font-size: {font_scale}% !important; }}
+        div[data-testid="stDataFrame"] table {{ background-color: {bg_color} !important; }}
+    </style>"""
+
+def column_selector(label, all_columns, default_order, key):
+    if key not in st.session_state:
+        st.session_state[key] = default_order
+    new_order = st.multiselect(label, options=all_columns, default=st.session_state[key], key=key+"_multiselect")
+    if new_order != st.session_state[key]:
+        st.session_state[key] = new_order
+        st.rerun()
+    return st.session_state[key]
 
 # ======================== بدء التشغيل ========================
 init_db()
