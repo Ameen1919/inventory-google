@@ -1056,7 +1056,7 @@ elif choice == "📦 إدارة الأصناف":
     unit_dict = {opt: u['id'] for opt, u in zip(unit_options, units)}
     unit_id_to_text = {u['id']: f"{u['unit_name']} ({u['unit_symbol']})" for u in units}
 
-        tab_add, tab_edit, tab_view, tab_delete = st.tabs(["➕ إضافة صنف جديد", "✏️ تعديل صنف", "📋 عرض الأصناف", "🗑️ حذف صنف"])
+    tab_add, tab_edit, tab_view, tab_delete = st.tabs(["➕ إضافة صنف جديد", "✏️ تعديل صنف", "📋 عرض الأصناف", "🗑️ حذف صنف"])
 
     with tab_add:
         st.subheader("إضافة صنف جديد")
