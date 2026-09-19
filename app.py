@@ -118,19 +118,34 @@ class DictRow(dict):
 
 
 class WrappedCursor:
-    """غلاف للـ cursor يحوّل الصفوف إلى قواميس."""
+    """غلاف للـ cursor يحوّل الصفوف إلى قواميس ويوفر execute."""
     def __init__(self, cursor):
         self._cursor = cursor
-        self.description = cursor.description
-        self.lastrowid = getattr(cursor, 'lastrowid', None)
+
+    @property
+    def description(self):
+        return self._cursor.description
+
+    @property
+    def lastrowid(self):
+        return getattr(self._cursor, 'lastrowid', None)
 
     def _make_row(self, raw_row):
         if raw_row is None:
             return None
-        if not self.description:
+        desc = self._cursor.description
+        if not desc:
             return raw_row
-        cols = [d[0] for d in self.description]
+        cols = [d[0] for d in desc]
         return DictRow(dict(zip(cols, raw_row)))
+
+    def execute(self, *args, **kwargs):
+        self._cursor.execute(*args, **kwargs)
+        return self
+
+    def executemany(self, *args, **kwargs):
+        self._cursor.executemany(*args, **kwargs)
+        return self
 
     def fetchone(self):
         return self._make_row(self._cursor.fetchone())
@@ -172,7 +187,6 @@ class WrappedConnection:
                 self._conn.commit()
             except Exception:
                 pass
-
 
 # ======================== دوال مساعدة ========================
 def hash_password(pwd):
