@@ -75,7 +75,8 @@ if 'telegram_chat_id' not in st.session_state:
     st.session_state.telegram_chat_id = saved_config.get('telegram_chat_id', "")
 if 'telegram_file_id' not in st.session_state:
     st.session_state.telegram_file_id = saved_config.get('telegram_file_id', "")
-
+if 'logo_base64' not in st.session_state:
+    st.session_state.logo_base64 = ""
 def apply_theme():
     st.markdown(f"""
     <style>
@@ -914,7 +915,7 @@ def column_selector(label, all_columns, default_order, key):
 
 # ======================== بدء التشغيل ========================
 init_db()
-
+_load_settings_from_db()
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.user = None
@@ -934,8 +935,12 @@ if not st.session_state.logged_in:
 
 # ======================== الواجهة الرئيسية ========================
 st.title(f"🧹 {st.session_state.store_name}")
-if st.session_state.logo_path and os.path.exists(st.session_state.logo_path):
-    st.image(st.session_state.logo_path, width=150)
+logo_b64 = st.session_state.get('logo_base64', '')
+if logo_b64:
+    try:
+        st.markdown(f'<img src="data:image/png;base64,{logo_b64}" width="150" />', unsafe_allow_html=True)
+    except Exception:
+        pass
 st.write(f"مرحباً {st.session_state.user['full_name']} ({st.session_state.user['role']})")
 if st.button("تسجيل الخروج"):
     logout()
@@ -944,32 +949,31 @@ with st.expander("⚙️ الإعدادات", expanded=False):
     new_font_size = st.slider("حجم الخط (%)", 50, 200, st.session_state.font_size, step=10, key="global_font")
     theme_color = st.color_picker("لون البرنامج", st.session_state.theme_color, key="global_theme")
     new_store_name = st.text_input("اسم المستودع", value=st.session_state.store_name, key="store_name_input")
-    if st.button("تحديث الاسم"):
+       if st.button("تحديث الاسم"):
         st.session_state.store_name = new_store_name
-        save_app_config({
-            'font_size': st.session_state.font_size,
-            'theme_color': st.session_state.theme_color,
-            'logo_path': st.session_state.logo_path,
-            'store_name': st.session_state.store_name,
-            'telegram_bot_token': st.session_state.telegram_bot_token,
-            'telegram_chat_id': st.session_state.telegram_chat_id,
-            'telegram_file_id': st.session_state.telegram_file_id
-        })
+        set_setting('store_name', new_store_name)
+        st.success("تم تحديث الاسم")
         st.rerun()
+
     uploaded_logo = st.file_uploader("رفع شعار", type=["png", "jpg", "jpeg"])
     if uploaded_logo is not None:
-        with open(LOGO_FILE, "wb") as f:
-            f.write(uploaded_logo.getbuffer())
-        st.session_state.logo_path = LOGO_FILE
-        save_app_config({
-            'font_size': st.session_state.font_size,
-            'theme_color': st.session_state.theme_color,
-            'logo_path': st.session_state.logo_path,
-            'store_name': st.session_state.store_name,
-            'telegram_bot_token': st.session_state.telegram_bot_token,
-            'telegram_chat_id': st.session_state.telegram_chat_id,
-            'telegram_file_id': st.session_state.telegram_file_id
-        })
+        b64 = base64.b64encode(uploaded_logo.getbuffer()).decode()
+        st.session_state.logo_base64 = b64
+        set_setting('logo_base64', b64)
+        st.success("تم حفظ الشعار في السحابة (يبقى بعد Reboot)")
+        st.rerun()
+
+    if st.session_state.get('logo_base64'):
+        if st.button("مسح الشعار"):
+            st.session_state.logo_base64 = ''
+            set_setting('logo_base64', '')
+            st.rerun()
+
+    if new_font_size != st.session_state.font_size or theme_color != st.session_state.theme_color:
+        st.session_state.font_size = new_font_size
+        st.session_state.theme_color = theme_color
+        set_setting('font_size', new_font_size)
+        set_setting('theme_color', theme_color)
         st.rerun()
     if st.session_state.logo_path and os.path.exists(st.session_state.logo_path):
         if st.button("مسح الشعار"):
@@ -1520,8 +1524,9 @@ elif choice == "📥 الوارد":
                         att = save_attachment_to_telegram(uploaded_file, trans_id)
                         if att:
                             conn.execute("UPDATE transactions SET attachment=? WHERE id=?", (att, trans_id))
-                    conn.execute("UPDATE items SET current_balance=current_balance+?, last_updated=? WHERE id=?", (qty, date.today().isoformat(), it['id']))
+                                        conn.execute("UPDATE items SET current_balance=current_balance+?, last_updated=? WHERE id=?", (qty, date.today().isoformat(), it['id']))
                     conn.commit()
+                    check_and_alert_item(it['id'])
                     st.success(f"تم الحفظ بنجاح (تاريخ الفاتورة: {invoice_date.isoformat()})")
                     st.session_state.inward_defaults = {
                         'item': item, 'qty': qty, 'supplier': supplier,
@@ -1774,7 +1779,9 @@ elif choice == "📤 الصادر":
                                 conn.execute("UPDATE items SET current_balance = current_balance - ?, last_updated=? WHERE id=?",
                                              (item_entry['qty'], date.today().isoformat(), item_entry['item_id']))
 
-                            conn.commit()
+                                                       conn.commit()
+                            for item_entry in st.session_state.outward_items:
+                                check_and_alert_item(item_entry['item_id'])
                             st.success(f"تم الحفظ بنجاح (تاريخ الإذن: {order_date.isoformat()})")
                             st.session_state.outward_form_defaults = {
                                 'hotel': selected_hotel,
@@ -1903,9 +1910,10 @@ elif choice == "📝 الجرد":
                              ('تسوية إضافة' if diff > 0 else 'تسوية عجز', it['id'], abs(diff), it['unit_id'], date.today().isoformat(), notes, st.session_state.user['full_name']))
                 st.success(f"تم إضافة حركة {'تسوية إضافة' if diff > 0 else 'تسوية عجز'} بمقدار {abs(diff)}.")
             conn.execute("UPDATE items SET current_balance=?, last_updated=? WHERE id=?", (actual, date.today().isoformat(), it['id']))
-            conn.execute("INSERT INTO inventory_counts (count_date,item_id,expected_qty,actual_qty,difference,notes,counted_by) VALUES (?,?,?,?,?,?,?)",
+                        conn.execute("INSERT INTO inventory_counts (count_date,item_id,expected_qty,actual_qty,difference,notes,counted_by) VALUES (?,?,?,?,?,?,?)",
                          (date.today().isoformat(), it['id'], it['current_balance'], actual, diff, notes, st.session_state.user['full_name']))
             conn.commit()
+            check_and_alert_item(it['id'])
             st.success("تم حفظ الجرد بنجاح")
             st.rerun()
 
