@@ -86,9 +86,6 @@ def apply_theme():
         background-color: {st.session_state.theme_color} !important;
         background-image: linear-gradient(135deg, {st.session_state.theme_color} 0%, #ffffff 100%) !important;
     }}
-    .stock-critical{{background-color:#ff4444;color:white;padding:5px 10px;border-radius:5px}}
-    .stock-warning{{background-color:#ffbb33;color:black;padding:5px 10px;border-radius:5px}}
-    .stock-good{{background-color:#00C851;color:white;padding:5px 10px;border-radius:5px}}
     </style>""", unsafe_allow_html=True)
 
 apply_theme()
@@ -104,16 +101,44 @@ if not os.path.exists(BACKUP_FOLDER):
 if not os.path.exists(ATTACHMENTS_FOLDER):
     os.makedirs(ATTACHMENTS_FOLDER)
 
-# ======================== أغلفة Turso لتوفير واجهة sqlite3 ========================
-class DictRow(dict):
-    def __init__(self, data):
-        super().__init__(data)
-        self._values = list(data.values())
+# ======================== أغلفة Turso ========================
+class DictRow:
+    """صف يدعم الوصول بالاسم (row['name']) وبالفهرس (row[0]) والتحويل لـ dict."""
+    def __init__(self, keys, values):
+        self._keys = list(keys)
+        self._values = tuple(values)
+        self._dict = dict(zip(self._keys, self._values))
 
     def __getitem__(self, key):
         if isinstance(key, int):
             return self._values[key]
-        return super().__getitem__(key)
+        return self._dict[key]
+
+    def __iter__(self):
+        return iter(self._values)
+
+    def __len__(self):
+        return len(self._values)
+
+    def keys(self):
+        return self._keys
+
+    def values(self):
+        return self._values
+
+    def items(self):
+        return list(self._dict.items())
+
+    def get(self, key, default=None):
+        return self._dict.get(key, default)
+
+    def __contains__(self, item):
+        if isinstance(item, str):
+            return item in self._dict
+        return item in self._values
+
+    def __repr__(self):
+        return f"DictRow({self._dict})"
 
 
 class WrappedCursor:
@@ -135,7 +160,7 @@ class WrappedCursor:
         if not desc:
             return raw_row
         cols = [d[0] for d in desc]
-        return DictRow(dict(zip(cols, raw_row)))
+        return DictRow(cols, raw_row)
 
     def execute(self, *args, **kwargs):
         self._cursor.execute(*args, **kwargs)
@@ -159,7 +184,6 @@ class WrappedCursor:
 
 
 class WrappedConnection:
-    """اتصال مُخزّن في الجلسة - لا يُغلق."""
     def __init__(self, conn):
         self._conn = conn
 
@@ -177,7 +201,6 @@ class WrappedConnection:
             pass
 
     def close(self):
-        # لا نُغلق الاتصال لأنه مُخزّن لإعادة الاستخدام
         pass
 
     def __enter__(self):
@@ -189,7 +212,6 @@ class WrappedConnection:
 
 
 class SQLiteWrapper:
-    """غلاف لـ sqlite3 المحلي - لا يُغلق."""
     def __init__(self, conn):
         self._conn = conn
 
@@ -214,6 +236,8 @@ class SQLiteWrapper:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_type is None:
             self.commit()
+
+
 # ======================== دوال مساعدة ========================
 def hash_password(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
@@ -276,6 +300,10 @@ def _ensure_db_initialized():
     _c = _conn.cursor()
     _c.execute('''CREATE TABLE IF NOT EXISTS units (id INTEGER PRIMARY KEY AUTOINCREMENT, unit_name TEXT UNIQUE, unit_symbol TEXT)''')
     _c.execute('''CREATE TABLE IF NOT EXISTS suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, supplier_name TEXT UNIQUE, contact_info TEXT, notes TEXT, attachments TEXT)''')
+    try:
+        _c.execute("ALTER TABLE suppliers ADD COLUMN attachments TEXT")
+    except:
+        pass
     _c.execute('''CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY AUTOINCREMENT, item_code TEXT UNIQUE, name TEXT NOT NULL UNIQUE, unit_id INTEGER, min_qty REAL DEFAULT 0, max_qty REAL DEFAULT 100, current_balance REAL DEFAULT 0, primary_supplier_id INTEGER, shelf_life_days INTEGER DEFAULT 365, notes TEXT, is_active BOOLEAN DEFAULT 1, created_date TEXT, last_updated TEXT)''')
     _c.execute('''CREATE TABLE IF NOT EXISTS hotels (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, contact_person TEXT, phone TEXT, notes TEXT)''')
     _c.execute('''CREATE TABLE IF NOT EXISTS outward_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, order_number TEXT UNIQUE, hotel_id INTEGER, recipient_name TEXT, order_date TEXT, notes TEXT, created_by TEXT)''')
@@ -283,6 +311,17 @@ def _ensure_db_initialized():
     _c.execute('''CREATE TABLE IF NOT EXISTS inventory_counts (id INTEGER PRIMARY KEY AUTOINCREMENT, count_date TEXT, item_id INTEGER, expected_qty REAL, actual_qty REAL, difference REAL, notes TEXT, counted_by TEXT)''')
     _c.execute('''CREATE TABLE IF NOT EXISTS expiry_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, batch_number TEXT, expiry_date TEXT, qty_remaining REAL, is_consumed BOOLEAN DEFAULT 0)''')
     _c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, role TEXT, full_name TEXT, is_active BOOLEAN DEFAULT 1)''')
+    for u_name, u_sym in [('قطعة','قطعة'),('لتر','لتر'),('كيلو','كجم'),('متر','متر'),('كرتونة','كرتونة'),('رول','رول'),('زجاجة','زجاجة'),('علبة','علبة'),('كيس','كيس')]:
+        _c.execute("INSERT OR IGNORE INTO units (unit_name, unit_symbol) VALUES (?,?)", (u_name, u_sym))
+    default_users = [
+        ('admin', hash_password('admin123'), 'super_admin', 'المدير العام'),
+        ('مشتريات', hash_password('buy123'), 'purchasing', 'مسؤول المشتريات'),
+        ('صرف', hash_password('out123'), 'disbursement', 'مسؤول الصرف'),
+        ('مشرف1', hash_password('sup123'), 'supervisor', 'مشرف أول'),
+        ('مشرف2', hash_password('sup456'), 'supervisor', 'مشرف ثاني')
+    ]
+    for uname, pwd, role, fname in default_users:
+        _c.execute("INSERT OR IGNORE INTO users (username,password,role,full_name) VALUES (?,?,?,?)", (uname, pwd, role, fname))
     _conn.commit()
     return True
 
@@ -293,10 +332,10 @@ def init_db():
     except Exception:
         pass
 
+
 def login(username, password):
     conn = get_db()
     user = conn.execute("SELECT * FROM users WHERE username=? AND password=? AND is_active=1", (username, hash_password(password))).fetchone()
-    conn.close()
     if user:
         st.session_state.user = dict(user)
         st.session_state.logged_in = True
@@ -405,7 +444,6 @@ def generate_outward_order_number():
     conn = get_db()
     today_str = date.today().strftime("%Y%m%d")
     last = conn.execute("SELECT order_number FROM outward_orders WHERE order_number LIKE ? ORDER BY id DESC LIMIT 1", (f"OUT-{today_str}-%",)).fetchone()
-    conn.close()
     if last:
         last_num = int(last['order_number'].split('-')[-1]) + 1
     else:
@@ -415,7 +453,6 @@ def generate_outward_order_number():
 
 # ======================== المرفقات عبر تيليجرام ========================
 def save_attachment_to_telegram(uploaded_file, transaction_id):
-    """ترفع الملف إلى تيليجرام وتعيد file_id."""
     token = st.session_state.telegram_bot_token
     chat_id = st.session_state.telegram_chat_id
     if not token or not chat_id:
@@ -445,7 +482,6 @@ def save_attachment_to_telegram(uploaded_file, transaction_id):
 
 
 def get_attachment_url(file_id):
-    """تجلب رابط تحميل مؤقت من تيليجرام باستخدام file_id."""
     token = st.session_state.telegram_bot_token
     if not token or not file_id:
         return None
@@ -462,10 +498,8 @@ def get_attachment_url(file_id):
 
 
 def display_attachment(file_id, caption="المرفق"):
-    """تعرض المرفق (صورة أو رابط تحميل) من تيليجرام أو محلياً."""
     if not file_id:
         return
-    # إذا كان المرفق القديم اسم ملف محلي (وليس file_id تيليجرام)
     if not file_id.startswith("AgAC") and not file_id.startswith("BQAC") and not file_id.startswith("BAAC"):
         local_path = os.path.join(ATTACHMENTS_FOLDER, file_id)
         if os.path.exists(local_path):
@@ -494,7 +528,6 @@ def display_attachment(file_id, caption="المرفق"):
 def get_supplier_attachments(supplier_id):
     conn = get_db()
     row = conn.execute("SELECT attachments FROM suppliers WHERE id=?", (supplier_id,)).fetchone()
-    conn.close()
     if row and row['attachments']:
         try:
             return json.loads(row['attachments'])
@@ -509,7 +542,6 @@ def add_supplier_attachment(supplier_id, file_id, file_name):
     conn = get_db()
     conn.execute("UPDATE suppliers SET attachments=? WHERE id=?", (json.dumps(atts, ensure_ascii=False), supplier_id))
     conn.commit()
-    conn.close()
 
 
 def delete_supplier_attachment(supplier_id, index):
@@ -519,7 +551,6 @@ def delete_supplier_attachment(supplier_id, index):
         conn = get_db()
         conn.execute("UPDATE suppliers SET attachments=? WHERE id=?", (json.dumps(atts, ensure_ascii=False), supplier_id))
         conn.commit()
-        conn.close()
 
 
 # ======================== النسخ الاحتياطي ========================
@@ -557,7 +588,7 @@ def create_backup(typ="يدوي", notes=""):
                 try:
                     rows = conn.execute(f"SELECT * FROM {t}").fetchall()
                     if rows:
-                        df = pd.DataFrame([dict(r) for r in rows])
+                        df = pd.DataFrame([list(r) for r in rows])
                         df.to_excel(w, sheet_name=t, index=False)
                     else:
                         pd.DataFrame().to_excel(w, sheet_name=t, index=False)
@@ -569,13 +600,12 @@ def create_backup(typ="يدوي", notes=""):
                 try:
                     rows = conn.execute(f"SELECT * FROM {t}").fetchall()
                     for r in rows:
-                        d = dict(r)
+                        d = dict(zip(r.keys(), r.values()))
                         cols = ', '.join(d.keys())
                         vals = ', '.join(["NULL" if v is None else "'" + str(v).replace("'", "''") + "'" for v in d.values()])
                         f.write(f"INSERT INTO {t} ({cols}) VALUES ({vals});\n")
                 except Exception:
                     pass
-        conn.close()
 
         with open(os.path.join(path, 'info.json'), 'w', encoding='utf-8') as f:
             json.dump({'date': ts, 'type': typ, 'notes': notes, 'tables': ALL_TABLES}, f, ensure_ascii=False)
@@ -668,7 +698,6 @@ def restore_backup(zip_path):
                 return False, "الملف المضغوط لا يحتوي على بيانات صالحة."
 
         conn.commit()
-        conn.close()
         shutil.rmtree(tmp)
         recalculate_all_balances()
         return True, "تمت الاستعادة بنجاح"
@@ -680,7 +709,6 @@ def delete_transaction(trans_id):
     conn = get_db()
     trans = conn.execute("SELECT * FROM transactions WHERE id=?", (trans_id,)).fetchone()
     if not trans:
-        conn.close()
         return False, "الحركة غير موجودة"
     item_id = trans['item_id']
     qty = trans['qty']
@@ -691,7 +719,6 @@ def delete_transaction(trans_id):
         conn.execute("UPDATE items SET current_balance=current_balance+? WHERE id=?", (qty, item_id))
     conn.execute("DELETE FROM transactions WHERE id=?", (trans_id,))
     conn.commit()
-    conn.close()
     return True, "تم حذف الحركة بنجاح"
 
 
@@ -703,7 +730,6 @@ def delete_outward_order(order_id):
     conn.execute("DELETE FROM transactions WHERE order_id=?", (order_id,))
     conn.execute("DELETE FROM outward_orders WHERE id=?", (order_id,))
     conn.commit()
-    conn.close()
     return True, "تم حذف الإذن وإعادة الكميات"
 
 
@@ -715,7 +741,6 @@ def recalculate_all_balances():
         tout = conn.execute("SELECT COALESCE(SUM(qty),0) FROM transactions WHERE item_id=? AND transaction_type IN ('صادر','تسوية عجز')", (item['id'],)).fetchone()[0]
         conn.execute("UPDATE items SET current_balance=? WHERE id=?", (tin - tout, item['id']))
     conn.commit()
-    conn.close()
 
 
 # ======================== تيليجرام ========================
@@ -943,7 +968,7 @@ if choice == "📊 لوحة التحكم":
     st.divider()
     low_items = conn.execute("SELECT i.item_code, i.name, i.current_balance, i.min_qty, u.unit_symbol FROM items i LEFT JOIN units u ON i.unit_id=u.id WHERE i.current_balance<=i.min_qty AND i.is_active=1").fetchall()
     if low_items:
-        df = pd.DataFrame([dict(r) for r in low_items], columns=['كود', 'الصنف', 'الرصيد', 'الحد الأدنى', 'الوحدة'])
+        df = pd.DataFrame([list(r) for r in low_items], columns=['كود', 'الصنف', 'الرصيد', 'الحد الأدنى', 'الوحدة'])
         with st.expander("🎨 تنسيق جدول التنبيهات"):
             font_scale = st.slider("حجم الخط (%)", 50, 200, 100, 10, key="dash_font")
             color_option = st.selectbox("لون الجدول", ["افتراضي", "أخضر", "أزرق", "رمادي", "برتقالي"], key="dash_color")
@@ -954,7 +979,6 @@ if choice == "📊 لوحة التحكم":
         st.dataframe(df_disp, use_container_width=True)
         st.markdown(apply_table_styling(font_scale, bg), unsafe_allow_html=True)
         export_buttons(df_disp, "اصناف_منخفضة", "تقرير الأصناف أقل من الحد الأدنى")
-    conn.close()
 
 elif choice == "📦 إدارة الأصناف":
     if not check_perm():
@@ -1188,7 +1212,6 @@ elif choice == "📦 إدارة الأصناف":
                         st.rerun()
             except Exception as e:
                 st.error(f"❌ فشل قراءة الملف: {str(e)}")
-    conn.close()
 
 elif choice == "📏 الوحدات":
     if not check_perm():
@@ -1210,8 +1233,7 @@ elif choice == "📏 الوحدات":
     with tab2:
         units = conn.execute("SELECT id, unit_name, unit_symbol FROM units").fetchall()
         if units:
-            df_units = pd.DataFrame([dict(u) for u in units], columns=['id', 'unit_name', 'unit_symbol'])
-            df_units.columns = ['م', 'الوحدة', 'الرمز']
+            df_units = pd.DataFrame([list(u) for u in units], columns=['م', 'الوحدة', 'الرمز'])
             edited_units = st.data_editor(df_units, num_rows="dynamic", key="units_editor", use_container_width=True)
             if st.button("💾 حفظ تعديلات الوحدات", key="save_units"):
                 with conn:
@@ -1228,7 +1250,6 @@ elif choice == "📏 الوحدات":
             st.info("لا توجد وحدات")
     if st.button("🔄 إعادة تحميل الصفحة", key="reload_units"):
         st.rerun()
-    conn.close()
 
 elif choice == "🏨 الفنادق":
     if not check_perm():
@@ -1275,7 +1296,6 @@ elif choice == "🏨 الفنادق":
             st.info("لا توجد فنادق")
     if st.button("🔄 إعادة تحميل الصفحة", key="reload_hotels"):
         st.rerun()
-    conn.close()
 
 elif choice == "🏢 الموردين":
     if not check_perm():
@@ -1361,7 +1381,6 @@ elif choice == "🏢 الموردين":
                         st.error("فشل رفع المرفق")
     if st.button("🔄 إعادة تحميل الصفحة", key="reload_suppliers"):
         st.rerun()
-    conn.close()
 
 elif choice == "📥 الوارد":
     tab_in1, tab_in2 = st.tabs(["📝 تسجيل مشتريات", "📋 سجل المشتريات"])
@@ -1439,7 +1458,6 @@ elif choice == "📥 الوارد":
                         st.rerun()
                     else:
                         st.info("لا توجد تعديلات متراجع عنها لتقديمها")
-        conn.close()
 
     with tab_in2:
         st.subheader("سجل المشتريات")
@@ -1542,7 +1560,6 @@ elif choice == "📥 الوارد":
                                 st.rerun()
         else:
             st.info("لا توجد مشتريات في هذه الفترة")
-        conn.close()
 
 elif choice == "📤 الصادر":
     tab_out1, tab_out2 = st.tabs(["📝 إنشاء إذن صرف", "📋 سجل أذون الصرف"])
@@ -1689,7 +1706,6 @@ elif choice == "📤 الصادر":
                 if undo:
                     st.session_state.outward_form_values = st.session_state.outward_form_defaults.copy()
                     st.rerun()
-        conn.close()
 
     with tab_out2:
         st.subheader("سجل أذون الصرف")
@@ -1728,7 +1744,7 @@ elif choice == "📤 الصادر":
 
                     if items_in_order:
                         st.write("**الأصناف المصروفة:**")
-                        df_items = pd.DataFrame([dict(r) for r in items_in_order], columns=['الصنف', 'الكمية', 'الوحدة'])
+                        df_items = pd.DataFrame([list(r) for r in items_in_order], columns=['الصنف', 'الكمية', 'الوحدة'])
                         st.dataframe(df_items, use_container_width=True)
 
                     col_btn_print, col_btn_delete = st.columns(2)
@@ -1786,7 +1802,6 @@ elif choice == "📤 الصادر":
                                 st.rerun()
         else:
             st.info("لا توجد أذون صرف في هذه الفترة")
-        conn.close()
 
 elif choice == "📝 الجرد":
     st.header("الجرد الدوري")
@@ -1810,7 +1825,6 @@ elif choice == "📝 الجرد":
             conn.commit()
             st.success("تم حفظ الجرد بنجاح")
             st.rerun()
-    conn.close()
 
 elif choice == "📈 التقارير":
     st.header("التقارير")
@@ -1865,7 +1879,7 @@ elif choice == "📈 التقارير":
         query += " ORDER BY t.id DESC"
         data = conn.execute(query, params).fetchall()
         if data:
-            df = pd.DataFrame([dict(r) for r in data], columns=['رقم الحركة', 'التاريخ', 'الصنف', 'النوع', 'الكمية', 'الوحدة', 'الفندق', 'المورد', 'سعر الوحدة', 'ملاحظات', 'مرفق'])
+            df = pd.DataFrame([list(r) for r in data], columns=['رقم الحركة', 'التاريخ', 'الصنف', 'النوع', 'الكمية', 'الوحدة', 'الفندق', 'المورد', 'سعر الوحدة', 'ملاحظات', 'مرفق'])
 
             def attachment_status(fid):
                 if fid:
@@ -1898,7 +1912,7 @@ elif choice == "📈 التقارير":
 
         items = conn.execute("SELECT i.item_code, i.name, i.current_balance, u.unit_symbol FROM items i LEFT JOIN units u ON i.unit_id=u.id WHERE i.is_active=1").fetchall()
         if items:
-            df = pd.DataFrame([dict(r) for r in items], columns=['كود', 'الصنف', 'الرصيد', 'الوحدة'])
+            df = pd.DataFrame([list(r) for r in items], columns=['كود', 'الصنف', 'الرصيد', 'الوحدة'])
             ordered = [c for c in bal_cols if c in df.columns]
             remaining = [c for c in df.columns if c not in ordered]
             df_disp = df[ordered + remaining]
@@ -1908,7 +1922,6 @@ elif choice == "📈 التقارير":
             export_buttons(df_disp, "ارصدة", report_title)
         else:
             st.info("لا توجد أصناف نشطة")
-    conn.close()
 
 elif choice == "🗑️ إدارة الحركات (حذف)":
     if not has_role('super_admin'):
@@ -1920,7 +1933,7 @@ elif choice == "🗑️ إدارة الحركات (حذف)":
                            FROM transactions t JOIN items i ON t.item_id=i.id LEFT JOIN hotels h ON t.hotel_id=h.id
                            ORDER BY t.id DESC LIMIT 50""").fetchall()
     if trans:
-        df = pd.DataFrame([dict(r) for r in trans], columns=['رقم', 'النوع', 'الصنف', 'الفندق', 'الكمية', 'التاريخ', 'ملاحظات'])
+        df = pd.DataFrame([list(r) for r in trans], columns=['رقم', 'النوع', 'الصنف', 'الفندق', 'الكمية', 'التاريخ', 'ملاحظات'])
         st.dataframe(df)
         trans_id = st.number_input("أدخل رقم الحركة للحذف", min_value=1, step=1)
         if st.button("حذف الحركة واسترجاع تأثيرها"):
@@ -1932,7 +1945,6 @@ elif choice == "🗑️ إدارة الحركات (حذف)":
                 st.error(msg)
     else:
         st.info("لا توجد حركات")
-    conn.close()
 
 elif choice == "💾 النسخ الاحتياطي":
     st.header("النسخ الاحتياطي")
@@ -1990,7 +2002,7 @@ elif choice == "👥 المستخدمين":
     conn = get_db()
     users = conn.execute("SELECT username, role, full_name FROM users").fetchall()
     if users:
-        df = pd.DataFrame([dict(u) for u in users], columns=['مستخدم', 'دور', 'اسم'])
+        df = pd.DataFrame([list(u) for u in users], columns=['مستخدم', 'دور', 'اسم'])
         st.dataframe(df, use_container_width=True)
     with st.form("add_user"):
         un = st.text_input("اسم المستخدم")
@@ -2005,4 +2017,3 @@ elif choice == "👥 المستخدمين":
                 st.rerun()
             except:
                 st.error("مستخدم موجود")
-    conn.close()
