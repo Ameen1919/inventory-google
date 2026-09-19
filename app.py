@@ -88,8 +88,14 @@ def apply_theme():
         background-color: {st.session_state.theme_color} !important;
         background-image: linear-gradient(135deg, {st.session_state.theme_color} 0%, #ffffff 100%) !important;
     }}
+    @media (max-width: 768px) {{
+        [data-testid="stSidebar"],
+        [data-testid="stSidebarCollapsedControl"],
+        [data-testid="collapsedControl"] {{
+            display: none !important;
+        }}
+    }}
     </style>""", unsafe_allow_html=True)
-
 apply_theme()
 
 DB_NAME = 'cleaning_inventory.db'
