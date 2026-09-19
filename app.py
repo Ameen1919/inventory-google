@@ -1056,7 +1056,7 @@ elif choice == "📦 إدارة الأصناف":
     unit_dict = {opt: u['id'] for opt, u in zip(unit_options, units)}
     unit_id_to_text = {u['id']: f"{u['unit_name']} ({u['unit_symbol']})" for u in units}
 
-    tab_add, tab_edit, tab_view = st.tabs(["➕ إضافة صنف جديد", "✏️ تعديل صنف", "📋 عرض الأصناف"])
+        tab_add, tab_edit, tab_view, tab_delete = st.tabs(["➕ إضافة صنف جديد", "✏️ تعديل صنف", "📋 عرض الأصناف", "🗑️ حذف صنف"])
 
     with tab_add:
         st.subheader("إضافة صنف جديد")
@@ -1165,6 +1165,71 @@ elif choice == "📦 إدارة الأصناف":
                 st.info("لا توجد نتائج مطابقة للبحث")
         else:
             st.info("لا توجد أصناف مسجلة")
+                with tab_delete:
+        st.subheader("حذف أو تعطيل صنف")
+        st.caption("ملاحظة: الصنف اللي فيه حركات سابقة لا يمكن حذفه، لكن يمكن تعطيله فقط.")
+
+        all_items = conn.execute("SELECT id, item_code, name, is_active, current_balance FROM items ORDER BY name").fetchall()
+
+        if not all_items:
+            st.info("لا توجد أصناف")
+        else:
+            item_names = [f"{it['name']} (كود: {it['item_code']})" for it in all_items]
+            selected_name = st.selectbox("اختر الصنف", item_names, key="delete_item_select")
+            selected = next((it for it in all_items if f"{it['name']} (كود: {it['item_code']})" == selected_name), None)
+
+            if selected:
+                st.divider()
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**اسم الصنف:** {selected['name']}")
+                    st.write(f"**الكود:** {selected['item_code']}")
+                with col2:
+                    st.write(f"**الرصيد الحالي:** {selected['current_balance']}")
+                    st.write(f"**الحالة:** {'نشط' if selected['is_active'] else 'معطل'}")
+
+                trans_count = conn.execute("SELECT COUNT(*) FROM transactions WHERE item_id=?", (selected['id'],)).fetchone()[0]
+                st.info(f"عدد الحركات المرتبطة بالصنف: **{trans_count}**")
+
+                st.divider()
+                col_btn1, col_btn2, col_btn3 = st.columns(3)
+
+                with col_btn1:
+                    if trans_count == 0:
+                        if st.button("🗑️ حذف الصنف نهائياً", key=f"del_item_{selected['id']}", type="primary"):
+                            if st.session_state.get(f"confirm_del_{selected['id']}", False):
+                                conn.execute("DELETE FROM expiry_alerts WHERE item_id=?", (selected['id'],))
+                                conn.execute("DELETE FROM inventory_counts WHERE item_id=?", (selected['id'],))
+                                conn.execute("DELETE FROM items WHERE id=?", (selected['id'],))
+                                conn.commit()
+                                st.success(f"✅ تم حذف الصنف '{selected['name']}' نهائياً")
+                                st.session_state[f"confirm_del_{selected['id']}"] = False
+                                st.rerun()
+                            else:
+                                st.session_state[f"confirm_del_{selected['id']}"] = True
+                                st.warning("⚠️ اضغط مرة أخرى للتأكيد")
+                                st.rerun()
+                    else:
+                        st.button("🗑️ حذف الصنف نهائياً", disabled=True, key=f"del_item_disabled_{selected['id']}")
+                        st.caption("لا يمكن الحذف لوجود حركات مرتبطة")
+
+                with col_btn2:
+                    if selected['is_active']:
+                        if st.button("⏸️ تعطيل الصنف", key=f"disable_item_{selected['id']}"):
+                            conn.execute("UPDATE items SET is_active=0 WHERE id=?", (selected['id'],))
+                            conn.commit()
+                            st.success(f"تم تعطيل '{selected['name']}'")
+                            st.rerun()
+                    else:
+                        if st.button("▶️ تنشيط الصنف", key=f"enable_item_{selected['id']}"):
+                            conn.execute("UPDATE items SET is_active=1 WHERE id=?", (selected['id'],))
+                            conn.commit()
+                            st.success(f"تم تنشيط '{selected['name']}'")
+                            st.rerun()
+
+                with col_btn3:
+                    if st.button("🔄 إعادة تحميل", key=f"reload_item_{selected['id']}"):
+                        st.rerun()
 elif choice == "📏 الوحدات":
     if not check_perm():
         st.error("غير مصرح")
