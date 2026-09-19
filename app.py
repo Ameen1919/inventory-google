@@ -360,6 +360,91 @@ def check_perm(role=None):
 
 def has_role(role):
     return st.session_state.get('user', {}).get('role') == role
+    # ======================== الإعدادات عبر Turso ========================
+def get_setting(key, default=None):
+    try:
+        conn = get_db()
+        row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        if row:
+            return row['value']
+    except Exception:
+        pass
+    return default
+
+
+def set_setting(key, value):
+    try:
+        conn = get_db()
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value) if value is not None else ""))
+        conn.commit()
+        return True
+    except Exception:
+        return False
+
+
+def _load_settings_from_db():
+    if st.session_state.get('_settings_loaded'):
+        return
+    try:
+        conn = get_db()
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+        s = {}
+        for r in rows:
+            s[r['key']] = r['value']
+        if 'font_size' in s:
+            try:
+                st.session_state.font_size = int(s['font_size'])
+            except Exception:
+                pass
+        if 'theme_color' in s:
+            st.session_state.theme_color = s['theme_color']
+        if 'store_name' in s:
+            st.session_state.store_name = s['store_name']
+        if 'logo_base64' in s:
+            st.session_state.logo_base64 = s['logo_base64']
+        if 'telegram_file_id' in s:
+            st.session_state.telegram_file_id = s['telegram_file_id']
+    except Exception:
+        pass
+    st.session_state._settings_loaded = True
+
+
+# ======================== تنبيهات المخزون ========================
+def send_stock_alert(item_name, current_balance, min_qty, unit_symbol):
+    token = st.session_state.get('telegram_bot_token', '')
+    chat_id = st.session_state.get('telegram_chat_id', '')
+    if not token or not chat_id:
+        return False
+    try:
+        msg = f"⚠️ تنبيه نقص مخزون\n\nالصنف: {item_name}\nالرصيد الحالي: {current_balance} {unit_symbol}\nالحد الأدنى: {min_qty}"
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        requests.post(url, data={'chat_id': chat_id, 'text': msg}, timeout=10)
+        return True
+    except Exception:
+        return False
+
+
+def check_and_alert_item(item_id):
+    try:
+        conn = get_db()
+        row = conn.execute("""
+            SELECT i.name, i.current_balance, i.min_qty, u.unit_symbol
+            FROM items i LEFT JOIN units u ON i.unit_id = u.id
+            WHERE i.id = ?
+        """, (item_id,)).fetchone()
+        if not row:
+            return
+        if row['current_balance'] > row['min_qty']:
+            return
+        today = date.today().isoformat()
+        alert_key = f"alert_{item_id}_{today}"
+        existing = conn.execute("SELECT value FROM settings WHERE key=?", (alert_key,)).fetchone()
+        if existing:
+            return
+        send_stock_alert(row['name'], row['current_balance'], row['min_qty'], row['unit_symbol'] or '')
+        set_setting(alert_key, "sent")
+    except Exception:
+        pass
 
 
 # ======================== PDF عربي ========================
