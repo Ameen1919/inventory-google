@@ -106,7 +106,6 @@ if not os.path.exists(ATTACHMENTS_FOLDER):
 
 # ======================== أغلفة Turso لتوفير واجهة sqlite3 ========================
 class DictRow(dict):
-    """صف يدعم الوصول بالمفتاح (row['name']) وبالفهرس (row[0])."""
     def __init__(self, data):
         super().__init__(data)
         self._values = list(data.values())
@@ -118,7 +117,6 @@ class DictRow(dict):
 
 
 class WrappedCursor:
-    """غلاف للـ cursor يحوّل الصفوف إلى قواميس ويوفر execute."""
     def __init__(self, cursor):
         self._cursor = cursor
 
@@ -161,7 +159,7 @@ class WrappedCursor:
 
 
 class WrappedConnection:
-    """غلاف لاتصال Turso يوفر واجهة مشابهة لـ sqlite3."""
+    """اتصال مُخزّن في الجلسة - لا يُغلق."""
     def __init__(self, conn):
         self._conn = conn
 
@@ -173,28 +171,60 @@ class WrappedConnection:
         return WrappedCursor(self._conn.cursor())
 
     def commit(self):
-        self._conn.commit()
+        try:
+            self._conn.commit()
+        except Exception:
+            pass
 
     def close(self):
-        self._conn.close()
+        # لا نُغلق الاتصال لأنه مُخزّن لإعادة الاستخدام
+        pass
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_type is None:
-            try:
-                self._conn.commit()
-            except Exception:
-                pass
+            self.commit()
 
+
+class SQLiteWrapper:
+    """غلاف لـ sqlite3 المحلي - لا يُغلق."""
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, *args, **kwargs):
+        return self._conn.execute(*args, **kwargs)
+
+    def cursor(self):
+        return self._conn.cursor()
+
+    def commit(self):
+        try:
+            self._conn.commit()
+        except Exception:
+            pass
+
+    def close(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            self.commit()
 # ======================== دوال مساعدة ========================
 def hash_password(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
 
 
 def get_db():
-    """الاتصال بقاعدة بيانات Turso (مع fallback محلي)."""
+    """الحصول على الاتصال (مُخزّن في الجلسة لإعادة الاستخدام)."""
+    cached = st.session_state.get('_db_conn')
+    if cached is not None:
+        return cached
+
     url = ""
     token = ""
     try:
@@ -206,112 +236,62 @@ def get_db():
 
     if LIBSQL_AVAILABLE and url and token:
         try:
-            conn = libsql.connect(database=url, auth_token=token)
-            return WrappedConnection(conn)
+            raw = libsql.connect(database=url, auth_token=token)
+            conn = WrappedConnection(raw)
+            st.session_state._db_conn = conn
+            return conn
         except Exception as e:
-            st.warning(f"فشل الاتصال بـ Turso، سيتم استخدام قاعدة بيانات محلية: {e}")
+            st.warning(f"فشل الاتصال بـ Turso: {e}")
 
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
+    raw = sqlite3.connect(DB_NAME, check_same_thread=False)
+    raw.row_factory = sqlite3.Row
+    conn = SQLiteWrapper(raw)
+    st.session_state._db_conn = conn
     return conn
 
 
-def init_db():
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS units (id INTEGER PRIMARY KEY AUTOINCREMENT, unit_name TEXT UNIQUE, unit_symbol TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, supplier_name TEXT UNIQUE, contact_info TEXT, notes TEXT, attachments TEXT)''')
+@st.cache_resource
+def _ensure_db_initialized():
+    _url = ""
+    _token = ""
     try:
-        c.execute("ALTER TABLE suppliers ADD COLUMN attachments TEXT")
-    except:
+        _url = st.secrets.get("TURSO_URL", "")
+        _token = st.secrets.get("TURSO_TOKEN", "")
+    except Exception:
         pass
-    c.execute('''CREATE TABLE IF NOT EXISTS items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        item_code TEXT UNIQUE,
-        name TEXT NOT NULL UNIQUE,
-        unit_id INTEGER,
-        min_qty REAL DEFAULT 0,
-        max_qty REAL DEFAULT 100,
-        current_balance REAL DEFAULT 0,
-        primary_supplier_id INTEGER,
-        shelf_life_days INTEGER DEFAULT 365,
-        notes TEXT,
-        is_active BOOLEAN DEFAULT 1,
-        created_date TEXT,
-        last_updated TEXT
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS hotels (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, contact_person TEXT, phone TEXT, notes TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS outward_orders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_number TEXT UNIQUE,
-        hotel_id INTEGER,
-        recipient_name TEXT,
-        order_date TEXT,
-        notes TEXT,
-        created_by TEXT
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS transactions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        transaction_type TEXT,
-        item_id INTEGER,
-        hotel_id INTEGER,
-        qty REAL,
-        unit_id INTEGER,
-        batch_number TEXT,
-        expiry_date TEXT,
-        transaction_date TEXT,
-        notes TEXT,
-        created_by TEXT DEFAULT 'أمين المخزن',
-        attachment TEXT,
-        order_id INTEGER,
-        supplier_name TEXT,
-        unit_price REAL DEFAULT 0
-    )''')
-    for col, col_def in [('attachment','TEXT'),('order_id','INTEGER'),('supplier_name','TEXT'),('unit_price','REAL')]:
-        try:
-            c.execute(f"ALTER TABLE transactions ADD COLUMN {col} {col_def}")
-        except:
-            pass
-    c.execute('''CREATE TABLE IF NOT EXISTS inventory_counts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        count_date TEXT,
-        item_id INTEGER,
-        expected_qty REAL,
-        actual_qty REAL,
-        difference REAL,
-        notes TEXT,
-        counted_by TEXT
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS expiry_alerts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        item_id INTEGER,
-        batch_number TEXT,
-        expiry_date TEXT,
-        qty_remaining REAL,
-        is_consumed BOOLEAN DEFAULT 0
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE,
-        password TEXT,
-        role TEXT,
-        full_name TEXT,
-        is_active BOOLEAN DEFAULT 1
-    )''')
-    for u_name, u_sym in [('قطعة','قطعة'),('لتر','لتر'),('كيلو','كجم'),('متر','متر'),('كرتونة','كرتونة'),('رول','رول'),('زجاجة','زجاجة'),('علبة','علبة'),('كيس','كيس')]:
-        c.execute("INSERT OR IGNORE INTO units (unit_name, unit_symbol) VALUES (?,?)", (u_name, u_sym))
-    default_users = [
-        ('admin', hash_password('admin123'), 'super_admin', 'المدير العام'),
-        ('مشتريات', hash_password('buy123'), 'purchasing', 'مسؤول المشتريات'),
-        ('صرف', hash_password('out123'), 'disbursement', 'مسؤول الصرف'),
-        ('مشرف1', hash_password('sup123'), 'supervisor', 'مشرف أول'),
-        ('مشرف2', hash_password('sup456'), 'supervisor', 'مشرف ثاني')
-    ]
-    for uname, pwd, role, fname in default_users:
-        c.execute("INSERT OR IGNORE INTO users (username,password,role,full_name) VALUES (?,?,?,?)", (uname, pwd, role, fname))
-    conn.commit()
-    conn.close()
 
+    if LIBSQL_AVAILABLE and _url and _token:
+        try:
+            raw = libsql.connect(database=_url, auth_token=_token)
+            _conn = WrappedConnection(raw)
+        except Exception:
+            raw = sqlite3.connect(DB_NAME)
+            raw.row_factory = sqlite3.Row
+            _conn = raw
+    else:
+        raw = sqlite3.connect(DB_NAME)
+        raw.row_factory = sqlite3.Row
+        _conn = raw
+
+    _c = _conn.cursor()
+    _c.execute('''CREATE TABLE IF NOT EXISTS units (id INTEGER PRIMARY KEY AUTOINCREMENT, unit_name TEXT UNIQUE, unit_symbol TEXT)''')
+    _c.execute('''CREATE TABLE IF NOT EXISTS suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, supplier_name TEXT UNIQUE, contact_info TEXT, notes TEXT, attachments TEXT)''')
+    _c.execute('''CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY AUTOINCREMENT, item_code TEXT UNIQUE, name TEXT NOT NULL UNIQUE, unit_id INTEGER, min_qty REAL DEFAULT 0, max_qty REAL DEFAULT 100, current_balance REAL DEFAULT 0, primary_supplier_id INTEGER, shelf_life_days INTEGER DEFAULT 365, notes TEXT, is_active BOOLEAN DEFAULT 1, created_date TEXT, last_updated TEXT)''')
+    _c.execute('''CREATE TABLE IF NOT EXISTS hotels (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, contact_person TEXT, phone TEXT, notes TEXT)''')
+    _c.execute('''CREATE TABLE IF NOT EXISTS outward_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, order_number TEXT UNIQUE, hotel_id INTEGER, recipient_name TEXT, order_date TEXT, notes TEXT, created_by TEXT)''')
+    _c.execute('''CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, transaction_type TEXT, item_id INTEGER, hotel_id INTEGER, qty REAL, unit_id INTEGER, batch_number TEXT, expiry_date TEXT, transaction_date TEXT, notes TEXT, created_by TEXT DEFAULT 'أمين المخزن', attachment TEXT, order_id INTEGER, supplier_name TEXT, unit_price REAL DEFAULT 0)''')
+    _c.execute('''CREATE TABLE IF NOT EXISTS inventory_counts (id INTEGER PRIMARY KEY AUTOINCREMENT, count_date TEXT, item_id INTEGER, expected_qty REAL, actual_qty REAL, difference REAL, notes TEXT, counted_by TEXT)''')
+    _c.execute('''CREATE TABLE IF NOT EXISTS expiry_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, batch_number TEXT, expiry_date TEXT, qty_remaining REAL, is_consumed BOOLEAN DEFAULT 0)''')
+    _c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, role TEXT, full_name TEXT, is_active BOOLEAN DEFAULT 1)''')
+    _conn.commit()
+    return True
+
+
+def init_db():
+    try:
+        _ensure_db_initialized()
+    except Exception:
+        pass
 
 def login(username, password):
     conn = get_db()
