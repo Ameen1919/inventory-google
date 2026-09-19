@@ -16,6 +16,12 @@ from bidi.algorithm import get_display
 import base64
 import requests
 
+try:
+    import libsql
+    LIBSQL_AVAILABLE = True
+except ImportError:
+    LIBSQL_AVAILABLE = False
+
 # ======================== إعدادات الصفحة ========================
 st.set_page_config(page_title="مخزن النظافة", layout="wide", initial_sidebar_state="collapsed")
 
@@ -32,25 +38,29 @@ def load_app_config():
         'telegram_file_id': ""
     }
     if os.path.exists(APP_CONFIG_FILE):
-        with open(APP_CONFIG_FILE, 'r', encoding='utf-8') as f:
-            config.update(json.load(f))
-    # قراءة من secrets.toml إن وجدت (لها الأولوية)
+        try:
+            with open(APP_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                config.update(json.load(f))
+        except Exception:
+            pass
     try:
         if 'telegram' in st.secrets:
-            config['telegram_bot_token'] = st.secrets['telegram']['bot_token']
-            config['telegram_chat_id'] = st.secrets['telegram']['chat_id']
-            config['telegram_file_id'] = st.secrets['telegram'].get('file_id', "")
-    except:
+            config['telegram_bot_token'] = st.secrets['telegram'].get('bot_token', config['telegram_bot_token'])
+            config['telegram_chat_id'] = st.secrets['telegram'].get('chat_id', config['telegram_chat_id'])
+            config['telegram_file_id'] = st.secrets['telegram'].get('file_id', config['telegram_file_id'])
+    except Exception:
         pass
     return config
 
 def save_app_config(config):
-    with open(APP_CONFIG_FILE, 'w', encoding='utf-8') as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
+    try:
+        with open(APP_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 saved_config = load_app_config()
 
-# تعيين القيم في st.session_state
 if 'font_size' not in st.session_state:
     st.session_state.font_size = saved_config.get('font_size', 100)
 if 'theme_color' not in st.session_state:
@@ -99,12 +109,30 @@ def hash_password(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
 
 def get_db():
+    """الاتصال بقاعدة بيانات Turso (مع fallback محلي)."""
+    url = ""
+    token = ""
+    try:
+        url = st.secrets.get("TURSO_URL", "")
+        token = st.secrets.get("TURSO_TOKEN", "")
+    except Exception:
+        url = saved_config.get("turso_url", "")
+        token = saved_config.get("turso_token", "")
+    
+    if LIBSQL_AVAILABLE and url and token:
+        try:
+            conn = libsql.connect(database=url, auth_token=token)
+            conn.row_factory = sqlite3.Row
+            return conn
+        except Exception as e:
+            st.warning(f"فشل الاتصال بـ Turso، سيتم استخدام قاعدة بيانات محلية: {e}")
+    
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     return conn
 
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db()
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS units (id INTEGER PRIMARY KEY AUTOINCREMENT, unit_name TEXT UNIQUE, unit_symbol TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, supplier_name TEXT UNIQUE, contact_info TEXT, notes TEXT)''')
@@ -300,32 +328,148 @@ def generate_outward_order_number():
         last_num = 1
     return f"OUT-{today_str}-{last_num:04d}"
 
+# ======================== المرفقات عبر تيليجرام ========================
+def save_attachment_to_telegram(uploaded_file, transaction_id):
+    """ترفع الملف إلى تيليجرام وتعيد file_id."""
+    token = st.session_state.telegram_bot_token
+    chat_id = st.session_state.telegram_chat_id
+    if not token or not chat_id:
+        st.error("بيانات تيليجرام غير مكتملة، لا يمكن حفظ المرفق.")
+        return None
+    url = f"https://api.telegram.org/bot{token}/sendDocument"
+    try:
+        files = {'document': (uploaded_file.name, uploaded_file.getbuffer(), uploaded_file.type)}
+        data = {'chat_id': chat_id, 'caption': f"مرفق للحركة #{transaction_id}"}
+        resp = requests.post(url, files=files, data=data, timeout=60)
+        if resp.status_code == 200:
+            result = resp.json().get('result', {})
+            if 'document' in result:
+                return result['document'].get('file_id')
+            elif 'photo' in result:
+                photos = result.get('photo', [])
+                if photos:
+                    return photos[-1].get('file_id')
+            st.error("لم يتم استلام file_id من تيليجرام.")
+            return None
+        else:
+            st.error(f"فشل رفع الملف إلى تيليجرام: {resp.text}")
+            return None
+    except Exception as e:
+        st.error(f"خطأ أثناء رفع المرفق: {str(e)}")
+        return None
+
+
+def get_attachment_url(file_id):
+    """تجلب رابط تحميل مؤقت من تيليجرام باستخدام file_id."""
+    token = st.session_state.telegram_bot_token
+    if not token or not file_id:
+        return None
+    try:
+        info_url = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
+        resp = requests.get(info_url, timeout=30)
+        if resp.status_code == 200:
+            file_path = resp.json().get('result', {}).get('file_path')
+            if file_path:
+                return f"https://api.telegram.org/file/bot{token}/{file_path}"
+        return None
+    except Exception:
+        return None
+
+
+def display_attachment(file_id, caption="المرفق"):
+    """تعرض المرفق (صورة أو رابط تحميل) من تيليجرام."""
+    if not file_id:
+        return
+    # إذا كان المرفق القديم اسم ملف محلي (وليس file_id تيليجرام)
+    if not file_id.startswith("AgAC") and not file_id.startswith("BQAC") and not file_id.startswith("BAAC"):
+        local_path = os.path.join(ATTACHMENTS_FOLDER, file_id)
+        if os.path.exists(local_path):
+            ext = os.path.splitext(file_id)[1].lower()
+            if ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+                st.image(local_path, caption=caption, width=300)
+            else:
+                with open(local_path, "rb") as f:
+                    st.download_button(f"📎 تحميل {caption}", f, file_name=file_id)
+        else:
+            st.info(f"المرفق القديم '{file_id}' غير متوفر (كان محفوظاً محلياً).")
+        return
+    
+    file_url = get_attachment_url(file_id)
+    if not file_url:
+        st.warning("تعذر جلب المرفق من تيليجرام.")
+        return
+    lower_url = file_url.lower()
+    if any(ext in lower_url for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']):
+        st.image(file_url, caption=caption, width=300)
+    else:
+        st.markdown(f"[📎 تحميل {caption}]({file_url})", unsafe_allow_html=True)
+
+
 # ======================== النسخ الاحتياطي ========================
 def load_backup_config():
     if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE,'r',encoding='utf-8') as f: return json.load(f)
+        try:
+            with open(CONFIG_FILE,'r',encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
     return {'backup_history':[],'last_backup_date':None,'max_backups':10}
+
 def save_backup_config(cfg):
-    with open(CONFIG_FILE,'w',encoding='utf-8') as f: json.dump(cfg,f,ensure_ascii=False,indent=2)
-def create_backup(typ="يدوي",notes=""):
+    try:
+        with open(CONFIG_FILE,'w',encoding='utf-8') as f:
+            json.dump(cfg,f,ensure_ascii=False,indent=2)
+    except Exception:
+        pass
+
+ALL_TABLES = ['units','suppliers','items','hotels','outward_orders','transactions','inventory_counts','expiry_alerts','users']
+
+def create_backup(typ="يدوي", notes=""):
+    """إنشاء نسخة احتياطية (zip) تحتوي على بيانات كل الجداول كملفات Excel + نسخة SQL."""
     try:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         name = f"backup_{ts}"
         path = os.path.join(BACKUP_FOLDER, name)
         os.makedirs(path, exist_ok=True)
-        if os.path.exists(DB_NAME): shutil.copy2(DB_NAME, os.path.join(path, DB_NAME))
-        conn = sqlite3.connect(DB_NAME)
+        
+        conn = get_db()
+        # تصدير Excel
         with pd.ExcelWriter(os.path.join(path,'preview.xlsx'), engine='xlsxwriter') as w:
-            for t in ['items','hotels','transactions']:
-                try: pd.read_sql_query(f"SELECT * FROM {t}", conn).to_excel(w, sheet_name=t, index=False)
-                except: pass
+            for t in ALL_TABLES:
+                try:
+                    rows = conn.execute(f"SELECT * FROM {t}").fetchall()
+                    if rows:
+                        df = pd.DataFrame([dict(r) for r in rows])
+                        df.to_excel(w, sheet_name=t, index=False)
+                    else:
+                        pd.DataFrame().to_excel(w, sheet_name=t, index=False)
+                except Exception:
+                    pass
+        
+        # تصدير SQL (نسخة نصية)
+        with open(os.path.join(path, 'data.sql'), 'w', encoding='utf-8') as f:
+            for t in ALL_TABLES:
+                try:
+                    rows = conn.execute(f"SELECT * FROM {t}").fetchall()
+                    for r in rows:
+                        d = dict(r)
+                        cols = ', '.join(d.keys())
+                        vals = ', '.join(["NULL" if v is None else "'" + str(v).replace("'", "''") + "'" for v in d.values()])
+                        f.write(f"INSERT INTO {t} ({cols}) VALUES ({vals});\n")
+                except Exception:
+                    pass
         conn.close()
-        with open(os.path.join(path,'info.json'),'w',encoding='utf-8') as f: json.dump({'date':ts,'type':typ,'notes':notes},f)
+        
+        with open(os.path.join(path,'info.json'),'w',encoding='utf-8') as f:
+            json.dump({'date':ts,'type':typ,'notes':notes,'tables':ALL_TABLES},f,ensure_ascii=False)
+        
         zipf = os.path.join(BACKUP_FOLDER, f"{name}.zip")
         with zipfile.ZipFile(zipf,'w',zipfile.ZIP_DEFLATED) as zf:
             for root,_,files in os.walk(path):
-                for file in files: zf.write(os.path.join(root,file), file)
+                for file in files:
+                    zf.write(os.path.join(root,file), file)
         shutil.rmtree(path)
+        
         cfg = load_backup_config()
         cfg['last_backup_date'] = datetime.now().isoformat()
         cfg['backup_history'].append({'filename':f"{name}.zip",'date':ts,'type':typ,'notes':notes,'size':os.path.getsize(zipf)})
@@ -339,21 +483,84 @@ def create_backup(typ="يدوي",notes=""):
     except Exception as e:
         return False, None, str(e)
 
+
 def restore_backup(zip_path):
+    """استعادة البيانات من zip. يدعم ملفات Excel الحديثة وملفات .db القديمة."""
     try:
         tmp = "tmp_res"
         if os.path.exists(tmp): shutil.rmtree(tmp)
         os.makedirs(tmp)
-        with zipfile.ZipFile(zip_path,'r') as zf: zf.extractall(tmp)
+        with zipfile.ZipFile(zip_path,'r') as zf:
+            zf.extractall(tmp)
+        
+        conn = get_db()
+        
+        # الحالة 1: ملف قاعدة بيانات SQLite قديم
         db_src = os.path.join(tmp, DB_NAME)
         if os.path.exists(db_src):
-            if os.path.exists(DB_NAME): shutil.copy2(DB_NAME, DB_NAME+".emergency")
-            shutil.copy2(db_src, DB_NAME)
+            src = sqlite3.connect(db_src)
+            src.row_factory = sqlite3.Row
+            # حذف البيانات الحالية بالترتيب العكسي
+            for t in reversed(ALL_TABLES):
+                try:
+                    conn.execute(f"DELETE FROM {t}")
+                except Exception:
+                    pass
+            # إدخال البيانات بالترتيب الطبيعي
+            for t in ALL_TABLES:
+                try:
+                    rows = src.execute(f"SELECT * FROM {t}").fetchall()
+                    for r in rows:
+                        d = dict(r)
+                        cols = ', '.join(d.keys())
+                        placeholders = ', '.join(['?']*len(d))
+                        vals = list(d.values())
+                        try:
+                            conn.execute(f"INSERT INTO {t} ({cols}) VALUES ({placeholders})", vals)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            src.close()
+        
+        # الحالة 2: ملف Excel حديث
+        else:
+            excel_path = os.path.join(tmp, 'preview.xlsx')
+            if os.path.exists(excel_path):
+                xl = pd.ExcelFile(excel_path)
+                for t in reversed(ALL_TABLES):
+                    try:
+                        conn.execute(f"DELETE FROM {t}")
+                    except Exception:
+                        pass
+                for t in ALL_TABLES:
+                    if t in xl.sheet_names:
+                        try:
+                            df = pd.read_excel(xl, sheet_name=t)
+                            if df.empty: continue
+                            df = df.where(pd.notnull(df), None)
+                            cols = ', '.join(df.columns)
+                            placeholders = ', '.join(['?']*len(df.columns))
+                            for _, row in df.iterrows():
+                                vals = [None if (isinstance(v, float) and pd.isna(v)) else v for v in row.values]
+                                try:
+                                    conn.execute(f"INSERT INTO {t} ({cols}) VALUES ({placeholders})", vals)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+            else:
+                shutil.rmtree(tmp)
+                return False, "الملف المضغوط لا يحتوي على بيانات صالحة."
+        
+        conn.commit()
+        conn.close()
         shutil.rmtree(tmp)
         recalculate_all_balances()
-        return True, "تمت الاستعادة بنجاح وتم إعادة حساب الأرصدة"
+        return True, "تمت الاستعادة بنجاح"
     except Exception as e:
         return False, str(e)
+
 
 def delete_transaction(trans_id):
     conn = get_db()
@@ -379,14 +586,6 @@ def delete_outward_order(order_id):
     conn.commit(); conn.close()
     return True, "تم حذف الإذن وإعادة الكميات"
 
-def save_attachment(uploaded_file, transaction_id):
-    if uploaded_file is None: return None
-    ext = os.path.splitext(uploaded_file.name)[1]
-    safe_name = f"trans_{transaction_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
-    path = os.path.join(ATTACHMENTS_FOLDER, safe_name)
-    with open(path,"wb") as f: f.write(uploaded_file.getbuffer())
-    return safe_name
-
 def recalculate_all_balances():
     conn = get_db()
     items = conn.execute("SELECT id FROM items").fetchall()
@@ -408,7 +607,7 @@ def telegram_send_document(file_path, caption=""):
     url = f"https://api.telegram.org/bot{token}/sendDocument"
     try:
         with open(backup_path,'rb') as f:
-            resp = requests.post(url, files={'document':f}, data={'chat_id':chat_id,'caption':caption})
+            resp = requests.post(url, files={'document':f}, data={'chat_id':chat_id,'caption':caption}, timeout=120)
             if resp.status_code == 200:
                 file_id = resp.json().get('result',{}).get('document',{}).get('file_id')
                 if file_id:
@@ -438,16 +637,17 @@ def telegram_get_latest_db():
         return False, "لا يوجد ملف محفوظ، ارفع أولاً"
     try:
         info_url = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
-        resp = requests.get(info_url).json()
+        resp = requests.get(info_url, timeout=30).json()
         if not resp.get('ok'): return False, "فشل جلب معلومات الملف"
         file_path = resp['result']['file_path']
         download_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
-        db_resp = requests.get(download_url)
+        db_resp = requests.get(download_url, timeout=120)
         if db_resp.status_code == 200:
             temp_zip = "temp_telegram_backup.zip"
             with open(temp_zip,'wb') as f: f.write(db_resp.content)
             success, msg = restore_backup(temp_zip)
-            os.remove(temp_zip)
+            try: os.remove(temp_zip)
+            except: pass
             if success:
                 return True, "تمت الاستعادة من تيليجرام بنجاح"
             else:
@@ -475,14 +675,6 @@ def column_selector(label, all_columns, default_order, key):
 
 # ======================== بدء التشغيل ========================
 init_db()
-
-# استعادة تلقائية إذا كانت قاعدة البيانات مفقودة وتم ضبط تيليجرام
-if st.session_state.telegram_bot_token and st.session_state.telegram_chat_id and st.session_state.telegram_file_id:
-    if not os.path.exists(DB_NAME):
-        success, msg = telegram_get_latest_db()
-        if success:
-            st.success("تم استعادة قاعدة البيانات من تيليجرام تلقائيًا")
-            recalculate_all_balances()
 
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
@@ -538,7 +730,8 @@ with st.expander("⚙️ الإعدادات", expanded=False):
         st.rerun()
     if st.session_state.logo_path and os.path.exists(st.session_state.logo_path):
         if st.button("مسح الشعار"):
-            os.remove(st.session_state.logo_path)
+            try: os.remove(st.session_state.logo_path)
+            except: pass
             st.session_state.logo_path = None
             save_app_config({
                 'font_size': st.session_state.font_size,
@@ -567,7 +760,7 @@ with st.expander("⚙️ الإعدادات", expanded=False):
     st.subheader("📱 إعداد تيليجرام")
     token_input = st.text_input("Bot Token", value=st.session_state.telegram_bot_token, type="password", key="tg_token")
     chat_input = st.text_input("Chat ID", value=st.session_state.telegram_chat_id, key="tg_chat")
-    file_id_input = st.text_input("File ID (اختياري، يُحفظ للاستعادة الدائمة)", value=st.session_state.telegram_file_id, key="tg_file_id")
+    file_id_input = st.text_input("File ID (اختياري)", value=st.session_state.telegram_file_id, key="tg_file_id")
     if st.button("💾 حفظ بيانات تيليجرام"):
         st.session_state.telegram_bot_token = token_input
         st.session_state.telegram_chat_id = chat_input
@@ -645,7 +838,7 @@ elif choice == "📦 إدارة الأصناف":
             "id": it["id"],
             "item_code": it["item_code"],
             "name": it["name"],
-            "unit_text": unit_id_to_text.get(it["unit_id"], unit_options[0]),
+            "unit_text": unit_id_to_text.get(it["unit_id"], unit_options[0] if unit_options else ""),
             "current_balance": it["current_balance"],
             "min_qty": it["min_qty"],
             "max_qty": it["max_qty"],
@@ -710,7 +903,7 @@ elif choice == "📦 إدارة الأصناف":
                         if exists:
                             st.warning(f"الصنف '{row['name']}' موجود مسبقاً، تم تخطيه.")
                             continue
-                        unit_id = unit_dict.get(row["unit_text"], units[0]["id"])
+                        unit_id = unit_dict.get(row["unit_text"], units[0]["id"] if units else 1)
                         code = f"ITM-{datetime.now().strftime('%Y%m%d%H%M%S')}"
                         conn.execute("INSERT INTO items (item_code, name, unit_id, min_qty, max_qty, current_balance, is_active, notes, created_date, last_updated) VALUES (?,?,?,?,?,?,?,?,?,?)",
                                      (code, row["name"].strip(), unit_id, row["min_qty"], row["max_qty"],
@@ -718,7 +911,7 @@ elif choice == "📦 إدارة الأصناف":
                                       date.today().isoformat(), date.today().isoformat()))
                     else:
                         item_id = int(row["id"])
-                        unit_id = unit_dict.get(row["unit_text"], units[0]["id"])
+                        unit_id = unit_dict.get(row["unit_text"], units[0]["id"] if units else 1)
                         new_name = row["name"].strip() if pd.notna(row["name"]) else ""
                         if new_name == "":
                             continue
@@ -734,44 +927,14 @@ elif choice == "📦 إدارة الأصناف":
 
             conn.commit()
             st.success("تم حفظ التعديلات بنجاح")
-            items_updated = conn.execute(f"SELECT id, item_code, name, unit_id, current_balance, min_qty, max_qty, is_active, notes FROM items {condition} ORDER BY name").fetchall()
-            new_data = []
-            for it in items_updated:
-                new_data.append({
-                    "id": it["id"],
-                    "item_code": it["item_code"],
-                    "name": it["name"],
-                    "unit_text": unit_id_to_text.get(it["unit_id"], unit_options[0]),
-                    "current_balance": it["current_balance"],
-                    "min_qty": it["min_qty"],
-                    "max_qty": it["max_qty"],
-                    "is_active": bool(it["is_active"]),
-                    "notes": it["notes"],
-                    "delete": False
-                })
-            st.session_state.edited_df = pd.DataFrame(new_data)
+            st.session_state.edited_df = None
             st.session_state.redo_df = None
             st.rerun()
 
     with col_btn2:
         if st.button("↩️ تراجع"):
             st.session_state.redo_df = st.session_state.edited_df.copy()
-            items_orig = conn.execute(f"SELECT id, item_code, name, unit_id, current_balance, min_qty, max_qty, is_active, notes FROM items {condition} ORDER BY name").fetchall()
-            orig_data = []
-            for it in items_orig:
-                orig_data.append({
-                    "id": it["id"],
-                    "item_code": it["item_code"],
-                    "name": it["name"],
-                    "unit_text": unit_id_to_text.get(it["unit_id"], unit_options[0]),
-                    "current_balance": it["current_balance"],
-                    "min_qty": it["min_qty"],
-                    "max_qty": it["max_qty"],
-                    "is_active": bool(it["is_active"]),
-                    "notes": it["notes"],
-                    "delete": False
-                })
-            st.session_state.edited_df = pd.DataFrame(orig_data)
+            st.session_state.edited_df = None
             st.rerun()
 
     with col_btn3:
@@ -793,7 +956,7 @@ elif choice == "📦 إدارة الأصناف":
     if st.button("🔁 إعادة حساب جميع الأرصدة (من الحركات)"):
         with st.spinner("جاري إعادة حساب الأرصدة..."):
             recalculate_all_balances()
-        st.success("تمت إعادة حساب جميع الأرصدة بنجاح. الأرصدة الآن مطابقة للحركات الفعلية.")
+        st.success("تمت إعادة حساب جميع الأرصدة بنجاح.")
         st.rerun()
 
     with st.expander("📥 استيراد من Excel"):
@@ -1020,7 +1183,6 @@ elif choice == "📥 الوارد":
                     'unit_price': 0.0,
                     'invoice_date': date.today(),
                     'notes': "",
-                    'attachment': None
                 }
             if 'inward_form_values' not in st.session_state:
                 st.session_state.inward_form_values = st.session_state.inward_defaults.copy()
@@ -1051,19 +1213,15 @@ elif choice == "📥 الوارد":
                                  ('وارد',it['id'],qty,it['unit_id'],supplier if supplier != "لا يوجد موردين مسجلين" else "", unit_price, invoice_date.isoformat(),notes,st.session_state.user['full_name']))
                     trans_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
                     if uploaded_file:
-                        att = save_attachment(uploaded_file, trans_id)
-                        conn.execute("UPDATE transactions SET attachment=? WHERE id=?", (att, trans_id))
+                        att = save_attachment_to_telegram(uploaded_file, trans_id)
+                        if att:
+                            conn.execute("UPDATE transactions SET attachment=? WHERE id=?", (att, trans_id))
                     conn.execute("UPDATE items SET current_balance=current_balance+?, last_updated=? WHERE id=?",(qty,date.today().isoformat(),it['id']))
                     conn.commit()
                     st.success(f"تم الحفظ بنجاح (تاريخ الفاتورة: {invoice_date.isoformat()})")
                     st.session_state.inward_defaults = {
-                        'item': item,
-                        'qty': qty,
-                        'supplier': supplier,
-                        'unit_price': unit_price,
-                        'invoice_date': invoice_date,
-                        'notes': notes,
-                        'attachment': uploaded_file
+                        'item': item, 'qty': qty, 'supplier': supplier,
+                        'unit_price': unit_price, 'invoice_date': invoice_date, 'notes': notes
                     }
                     st.session_state.inward_form_values = st.session_state.inward_defaults.copy()
                     st.rerun()
@@ -1118,19 +1276,9 @@ elif choice == "📥 الوارد":
                         st.write(f"**ملاحظات:** {rec['notes'] or 'لا يوجد'}")
                     
                     if rec['attachment']:
-                        att_path = os.path.join(ATTACHMENTS_FOLDER, rec['attachment'])
-                        if os.path.exists(att_path):
-                            file_ext = os.path.splitext(rec['attachment'])[1].lower()
-                            if file_ext in ['.jpg', '.jpeg', '.png']:
-                                st.image(att_path, caption="المرفق", width=300)
-                            elif file_ext == '.pdf':
-                                with open(att_path, "rb") as f:
-                                    st.download_button("📄 تحميل PDF المرفق", f, file_name=rec['attachment'])
-                            else:
-                                with open(att_path, "rb") as f:
-                                    st.download_button("📎 تحميل المرفق", f, file_name=rec['attachment'])
+                        display_attachment(rec['attachment'], "المرفق")
                     
-                    col_btn_print, col_btn_edit, col_btn_delete = st.columns(3)
+                    col_btn_print, col_btn_delete = st.columns(2)
                     with col_btn_print:
                         if st.button(f"🖨️ طباعة #{rec['id']}", key=f"print_in_{rec['id']}"):
                             font_path = get_arabic_font()
@@ -1160,11 +1308,6 @@ elif choice == "📥 الوارد":
                             st.download_button(f"📥 تحميل PDF الإذن #{rec['id']}", data=pdf_bytes,
                                                file_name=f"Purchase_Order_{rec['id']}.pdf", mime="application/pdf")
                     
-                    with col_btn_edit:
-                        if st.button(f"✏️ تعديل #{rec['id']}", key=f"edit_in_{rec['id']}"):
-                            st.session_state[f"editing_in_{rec['id']}"] = True
-                            st.rerun()
-                    
                     with col_btn_delete:
                         if st.button(f"🗑️ حذف #{rec['id']}", key=f"del_in_{rec['id']}"):
                             if st.session_state.get(f"confirm_del_in_{rec['id']}", False):
@@ -1178,48 +1321,6 @@ elif choice == "📥 الوارد":
                             else:
                                 st.session_state[f"confirm_del_in_{rec['id']}"] = True
                                 st.warning("⚠️ اضغط مرة أخرى لتأكيد الحذف (سيتم خصم الكمية من المخزون).")
-                                st.rerun()
-                    
-                    if st.session_state.get(f"editing_in_{rec['id']}", False):
-                        with st.form(key=f"edit_form_in_{rec['id']}"):
-                            st.markdown("---")
-                            st.subheader(f"تعديل الوارد #{rec['id']}")
-                            items_list = conn.execute("SELECT id, name, unit_id FROM items WHERE is_active=1").fetchall()
-                            current_item_index = [i['id'] for i in items_list].index(rec['item_id'])
-                            new_item = st.selectbox("الصنف", [i['name'] for i in items_list], index=current_item_index)
-                            new_qty = st.number_input("الكمية", min_value=0.1, value=float(rec['qty']))
-                            suppliers_list = conn.execute("SELECT id, supplier_name FROM suppliers ORDER BY supplier_name").fetchall()
-                            supplier_options_edit = [s['supplier_name'] for s in suppliers_list]
-                            current_supplier = rec['supplier_name'] if rec['supplier_name'] in supplier_options_edit else (supplier_options_edit[0] if supplier_options_edit else "")
-                            new_supplier = st.selectbox("المورد", supplier_options_edit, index=supplier_options_edit.index(current_supplier) if current_supplier else 0)
-                            new_unit_price = st.number_input("سعر الوحدة", min_value=0.0, value=float(rec['unit_price'] if rec['unit_price'] else 0.0), step=0.01)
-                            new_invoice_date = st.date_input("تاريخ الفاتورة", value=datetime.strptime(rec['transaction_date'], '%Y-%m-%d').date())
-                            new_notes = st.text_input("ملاحظات", value=rec['notes'] if rec['notes'] else "")
-                            new_attachment = st.file_uploader("📎 استبدال المرفق (اختياري)", type=["png","jpg","jpeg","pdf"])
-                            col_save, col_cancel = st.columns(2)
-                            with col_save:
-                                save_edit = st.form_submit_button("💾 حفظ التعديلات")
-                            with col_cancel:
-                                cancel_edit = st.form_submit_button("❌ إلغاء")
-                            
-                            if save_edit:
-                                old_item_id = rec['item_id']
-                                new_item_data = next((i for i in items_list if i['name'] == new_item), None)
-                                conn.execute("UPDATE items SET current_balance = current_balance - ?, last_updated=? WHERE id=?", (rec['qty'], date.today().isoformat(), old_item_id))
-                                conn.execute("UPDATE items SET current_balance = current_balance + ?, last_updated=? WHERE id=?", (new_qty, date.today().isoformat(), new_item_data['id']))
-                                attachment_name = rec['attachment']
-                                if new_attachment:
-                                    attachment_name = save_attachment(new_attachment, rec['id'])
-                                conn.execute("""UPDATE transactions SET item_id=?, qty=?, unit_id=?, supplier_name=?, unit_price=?, transaction_date=?, notes=?, attachment=?
-                                              WHERE id=?""",
-                                             (new_item_data['id'], new_qty, new_item_data['unit_id'], new_supplier, new_unit_price, new_invoice_date.isoformat(), new_notes, attachment_name, rec['id']))
-                                conn.commit()
-                                st.success("تم تعديل الوارد بنجاح")
-                                st.session_state[f"editing_in_{rec['id']}"] = False
-                                st.rerun()
-                            
-                            if cancel_edit:
-                                st.session_state[f"editing_in_{rec['id']}"] = False
                                 st.rerun()
         else:
             st.info("لا توجد مشتريات في هذه الفترة")
@@ -1308,7 +1409,6 @@ elif choice == "📤 الصادر":
                                                   index=hotel_names.index(st.session_state.outward_form_values['hotel']) if st.session_state.outward_form_values['hotel'] in hotel_names else 0,
                                                   key="hotel_select")
                     current_hotel = next((h for h in hotels if h['name'] == selected_hotel), None)
-                    default_recipient = current_hotel['contact_person'] if current_hotel and current_hotel['contact_person'] else ""
                 with col_order2:
                     recipient = st.text_input("اسم مسؤول الاستلام (للتوقيع)", 
                                               value=st.session_state.outward_form_values['recipient'],
@@ -1365,61 +1465,11 @@ elif choice == "📤 الصادر":
                             }
                             st.session_state.outward_form_values = st.session_state.outward_form_defaults.copy()
                             st.session_state.outward_items = []
-                            
-                            # طباعة PDF
-                            pdf_items = []
-                            for item_entry in st.session_state.outward_items:
-                                unit_symbol = unit_dict_out.get(item_entry['unit_id'], '')
-                                pdf_items.append([item_entry['item_name'], str(item_entry['qty']), unit_symbol])
-                            font_path = get_arabic_font()
-                            pdf = FPDF()
-                            pdf.add_page()
-                            if font_path:
-                                pdf.add_font("Amiri", fname=font_path)
-                                pdf.set_font("Amiri", size=16)
-                            else:
-                                pdf.set_font("Helvetica", size=16)
-                            pdf.cell(0, 10, shape_arabic("إذن صرف مخزني"), ln=True, align='C')
-                            pdf.ln(5)
-                            pdf.set_font("Amiri", size=12) if font_path else pdf.set_font("Helvetica", size=12)
-                            pdf.cell(0, 8, shape_arabic(f"رقم الإذن: {order_number}"), ln=True, align='R')
-                            pdf.cell(0, 8, shape_arabic(f"التاريخ: {order_date.isoformat()}"), ln=True, align='R')
-                            pdf.cell(0, 8, shape_arabic(f"الفندق: {selected_hotel}"), ln=True, align='R')
-                            pdf.cell(0, 8, shape_arabic(f"مسؤول الاستلام: {recipient}"), ln=True, align='R')
-                            pdf.ln(5)
-                            pdf.set_fill_color(0,168,107); pdf.set_text_color(255,255,255)
-                            pdf.cell(30, 10, shape_arabic("الوحدة"), border=1, fill=True, align='C')
-                            pdf.cell(30, 10, shape_arabic("الكمية"), border=1, fill=True, align='C')
-                            pdf.cell(100, 10, shape_arabic("الصنف"), border=1, fill=True, align='C')
-                            pdf.ln()
-                            pdf.set_text_color(0,0,0)
-                            pdf.set_font("Amiri", size=10) if font_path else pdf.set_font("Helvetica", size=10)
-                            for row in pdf_items:
-                                pdf.cell(30, 8, shape_arabic(row[2]), border=1, align='C')
-                                pdf.cell(30, 8, shape_arabic(row[1]), border=1, align='C')
-                                pdf.cell(100, 8, shape_arabic(row[0]), border=1, align='C')
-                                pdf.ln()
-                            pdf.ln(10)
-                            pdf.cell(0, 10, shape_arabic("توقيع مسؤول الاستلام: ________________"), ln=True, align='R')
-                            pdf.cell(0, 10, shape_arabic("توقيع أمين المخزن: ________________"), ln=True, align='R')
-
-                            pdf_bytes = bytes(pdf.output())
-                            st.download_button("📄 تحميل إذن الصرف PDF", data=pdf_bytes,
-                                               file_name=f"{order_number}.pdf", mime="application/pdf")
-
                             st.rerun()
 
                 if undo:
                     st.session_state.outward_form_values = st.session_state.outward_form_defaults.copy()
                     st.rerun()
-
-                if redo:
-                    if 'outward_redo_values' in st.session_state:
-                        st.session_state.outward_form_values = st.session_state.outward_redo_values.copy()
-                        st.session_state.outward_redo_values = None
-                        st.rerun()
-                    else:
-                        st.info("لا توجد تعديلات متراجع عنها لتقديمها")
         conn.close()
     
     with tab_out2:
@@ -1489,7 +1539,7 @@ elif choice == "📤 الصادر":
                             pdf.set_text_color(0,0,0)
                             pdf.set_font("Amiri", size=10) if font_path else pdf.set_font("Helvetica", size=10)
                             for item in items_in_order:
-                                pdf.cell(30, 8, shape_arabic(item['unit_symbol']), border=1, align='C')
+                                pdf.cell(30, 8, shape_arabic(item['unit_symbol'] or ''), border=1, align='C')
                                 pdf.cell(30, 8, shape_arabic(str(item['qty'])), border=1, align='C')
                                 pdf.cell(100, 8, shape_arabic(item['name']), border=1, align='C')
                                 pdf.ln()
@@ -1539,7 +1589,6 @@ elif choice == "📝 الجرد":
                          (date.today().isoformat(),it['id'],it['current_balance'],actual,diff,notes,st.session_state.user['full_name']))
             conn.commit()
             st.success("تم حفظ الجرد بنجاح")
-            st.info("💡 حركات التسوية تظهر في التقارير عند اختيار 'الكل' أو 'تسوية إضافة/عجز'.")
             st.rerun()
     conn.close()
 
@@ -1590,16 +1639,14 @@ elif choice == "📈 التقارير":
         data = conn.execute(query, params).fetchall()
         if data:
             df = pd.DataFrame(data, columns=['رقم الحركة','التاريخ','الصنف','النوع','الكمية','الوحدة','الفندق','المورد','سعر الوحدة','ملاحظات','مرفق'])
-            def attachment_link(fname):
-                if fname and isinstance(fname, str) and fname.strip():
-                    path = os.path.join(ATTACHMENTS_FOLDER, fname)
-                    if os.path.exists(path):
-                        with open(path, "rb") as f:
-                            b64 = base64.b64encode(f.read()).decode()
-                        return f'<a href="data:application/octet-stream;base64,{b64}" download="{fname}">📎 تحميل</a>'
+            
+            def attachment_status(fid):
+                if fid:
+                    return "📎 موجود"
                 return ""
             if 'مرفق' in df.columns:
-                df['مرفق'] = df['مرفق'].apply(attachment_link)
+                df['مرفق'] = df['مرفق'].apply(attachment_status)
+            
             ordered = [c for c in cols_order if c in df.columns]
             remaining = [c for c in df.columns if c not in ordered]
             df_display = df[ordered + remaining]
@@ -1659,11 +1706,12 @@ elif choice == "💾 النسخ الاحتياطي":
     st.header("النسخ الاحتياطي")
     notes = st.text_input("ملاحظات")
     if st.button("إنشاء نسخة"):
-        ok, path, msg = create_backup("يدوي", notes)
+        with st.spinner("جاري إنشاء النسخة..."):
+            ok, path, msg = create_backup("يدوي", notes)
         if ok:
             st.success(msg)
             with open(path, "rb") as f:
-                st.download_button("تحميل النسخة", f, file_name=os.path.basename(path))
+                st.download_button("⬇️ تحميل النسخة", f, file_name=os.path.basename(path))
         else:
             st.error(msg)
     
@@ -1674,26 +1722,27 @@ elif choice == "💾 النسخ الاحتياطي":
         with open(tmp, "wb") as f:
             f.write(up.read())
         if st.button("استعادة"):
-            ok, msg = restore_backup(tmp)
+            with st.spinner("جاري الاستعادة..."):
+                ok, msg = restore_backup(tmp)
             if ok:
                 st.success(msg)
                 st.rerun()
             else:
                 st.error(msg)
 
-    # قسم تيليجرام
     st.divider()
     st.subheader("📱 النسخ الاحتياطي عبر تيليجرام")
     if st.button("⬆️ رفع قاعدة البيانات إلى تيليجرام"):
-        success, msg = telegram_send_document(DB_NAME, caption=f"نسخة احتياطية {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        with st.spinner("جاري الرفع..."):
+            success, msg = telegram_send_document(DB_NAME, caption=f"نسخة احتياطية {datetime.now().strftime('%Y-%m-%d %H:%M')}")
         if success:
             st.success(msg)
             st.info(f"📎 معرّف الملف (File ID) الحالي: `{st.session_state.telegram_file_id}`")
-            st.write("انسخ هذا المعرّف واحفظه في مكان آمن أو ضعه في secrets.toml للحفاظ عليه بعد إعادة التشغيل.")
         else:
             st.error(msg)
     if st.button("⬇️ استعادة قاعدة البيانات من تيليجرام"):
-        success, msg = telegram_get_latest_db()
+        with st.spinner("جاري الاستعادة..."):
+            success, msg = telegram_get_latest_db()
         if success:
             st.success(msg)
             recalculate_all_balances()
