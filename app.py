@@ -1163,7 +1163,7 @@ elif choice == "📦 إدارة الأصناف":
                 export_buttons(df, "الأصناف", "تقرير الأصناف")
             else:
                 st.info("لا توجد نتائج مطابقة للبحث")
-                   else:
+            else:
                 st.info("لا توجد أصناف مسجلة")
 
     with tab_delete:
