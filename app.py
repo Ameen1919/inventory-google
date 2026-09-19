@@ -949,7 +949,7 @@ with st.expander("⚙️ الإعدادات", expanded=False):
     new_font_size = st.slider("حجم الخط (%)", 50, 200, st.session_state.font_size, step=10, key="global_font")
     theme_color = st.color_picker("لون البرنامج", st.session_state.theme_color, key="global_theme")
     new_store_name = st.text_input("اسم المستودع", value=st.session_state.store_name, key="store_name_input")
-       if st.button("تحديث الاسم"):
+if st.button("تحديث الاسم"):
         st.session_state.store_name = new_store_name
         set_setting('store_name', new_store_name)
         st.success("تم تحديث الاسم")
