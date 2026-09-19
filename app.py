@@ -77,6 +77,7 @@ if 'telegram_file_id' not in st.session_state:
     st.session_state.telegram_file_id = saved_config.get('telegram_file_id', "")
 if 'logo_base64' not in st.session_state:
     st.session_state.logo_base64 = ""
+
 def apply_theme():
     st.markdown(f"""
     <style>
@@ -104,7 +105,6 @@ if not os.path.exists(ATTACHMENTS_FOLDER):
 
 # ======================== أغلفة Turso ========================
 class DictRow:
-    """صف يدعم الوصول بالاسم (row['name']) وبالفهرس (row[0]) والتحويل لـ dict."""
     def __init__(self, keys, values):
         self._keys = list(keys)
         self._values = tuple(values)
@@ -245,7 +245,6 @@ def hash_password(pwd):
 
 
 def get_db():
-    """الحصول على الاتصال (مُخزّن في الجلسة لإعادة الاستخدام)."""
     cached = st.session_state.get('_db_conn')
     if cached is not None:
         return cached
@@ -313,7 +312,9 @@ def _ensure_db_initialized():
     _c.execute('''CREATE TABLE IF NOT EXISTS expiry_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, batch_number TEXT, expiry_date TEXT, qty_remaining REAL, is_consumed BOOLEAN DEFAULT 0)''')
     _c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, role TEXT, full_name TEXT, is_active BOOLEAN DEFAULT 1)''')
     _c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
-    for u_name, u_sym in [('قطعة','قطعة'),('لتر','لتر'),('كيلو','كجم'),('متر','متر'),('كرتونة','كرتونة'),('رول','رول'),('زجاجة','زجاجة'),('علبة','علبة'),('كيس','كيس')]:    default_users = [
+    for u_name, u_sym in [('قطعة','قطعة'),('لتر','لتر'),('كيلو','كجم'),('متر','متر'),('كرتونة','كرتونة'),('رول','رول'),('زجاجة','زجاجة'),('علبة','علبة'),('كيس','كيس')]:
+        _c.execute("INSERT OR IGNORE INTO units (unit_name, unit_symbol) VALUES (?,?)", (u_name, u_sym))
+    default_users = [
         ('admin', hash_password('admin123'), 'super_admin', 'المدير العام'),
         ('مشتريات', hash_password('buy123'), 'purchasing', 'مسؤول المشتريات'),
         ('صرف', hash_password('out123'), 'disbursement', 'مسؤول الصرف'),
@@ -337,7 +338,7 @@ def login(username, password):
     conn = get_db()
     user = conn.execute("SELECT * FROM users WHERE username=? AND password=? AND is_active=1", (username, hash_password(password))).fetchone()
     if user:
-        st.session_state.user = dict(user)
+        st.session_state.user = dict(zip(user.keys(), user.values()))
         st.session_state.logged_in = True
         return True
     return False
@@ -361,7 +362,9 @@ def check_perm(role=None):
 
 def has_role(role):
     return st.session_state.get('user', {}).get('role') == role
-    # ======================== الإعدادات عبر Turso ========================
+
+
+# ======================== الإعدادات عبر Turso ========================
 def get_setting(key, default=None):
     try:
         conn = get_db()
@@ -659,6 +662,7 @@ def save_backup_config(cfg):
 
 ALL_TABLES = ['units', 'suppliers', 'items', 'hotels', 'outward_orders', 'transactions', 'inventory_counts', 'expiry_alerts', 'users', 'settings']
 
+
 def create_backup(typ="يدوي", notes=""):
     try:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -844,15 +848,7 @@ def telegram_send_document(file_path, caption=""):
                 file_id = resp.json().get('result', {}).get('document', {}).get('file_id')
                 if file_id:
                     st.session_state.telegram_file_id = file_id
-                    save_app_config({
-                        'font_size': st.session_state.font_size,
-                        'theme_color': st.session_state.theme_color,
-                        'logo_path': st.session_state.logo_path,
-                        'store_name': st.session_state.store_name,
-                        'telegram_bot_token': st.session_state.telegram_bot_token,
-                        'telegram_chat_id': st.session_state.telegram_chat_id,
-                        'telegram_file_id': st.session_state.telegram_file_id
-                    })
+                    set_setting('telegram_file_id', file_id)
                 return True, "تم إرسال النسخة الاحتياطية إلى تيليجرام"
             else:
                 return False, f"فشل: {resp.text}"
@@ -916,6 +912,7 @@ def column_selector(label, all_columns, default_order, key):
 # ======================== بدء التشغيل ========================
 init_db()
 _load_settings_from_db()
+
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.user = None
@@ -946,16 +943,6 @@ if st.button("تسجيل الخروج"):
     logout()
 
 with st.expander("⚙️ الإعدادات", expanded=False):
-    new_font_size = st.slider("حجم الخط (%)", 50, 200, st.session_state.font_size, step=10, key="global_font")
-    theme_color = st.color_picker("لون البرنامج", st.session_state.theme_color, key="global_theme")
-    new_store_name = st.text_input("اسم المستودع", value=st.session_state.store_name, key="store_name_input")
-if st.button("تحديث الاسم"):
-        st.session_state.store_name = new_store_name
-        set_setting('store_name', new_store_name)
-        st.success("تم تحديث الاسم")
-        st.rerun()
-
-   with st.expander("⚙️ الإعدادات", expanded=False):
     new_font_size = st.slider("حجم الخط (%)", 50, 200, st.session_state.font_size, step=10, key="global_font")
     theme_color = st.color_picker("لون البرنامج", st.session_state.theme_color, key="global_theme")
     new_store_name = st.text_input("اسم المستودع", value=st.session_state.store_name, key="store_name_input")
@@ -1007,6 +994,7 @@ if st.button("تحديث الاسم"):
             'telegram_file_id': st.session_state.telegram_file_id
         })
         st.success("تم حفظ بيانات تيليجرام")
+
 # ======================== القائمة ========================
 menu = []
 if check_perm():
@@ -1506,7 +1494,7 @@ elif choice == "📥 الوارد":
                         att = save_attachment_to_telegram(uploaded_file, trans_id)
                         if att:
                             conn.execute("UPDATE transactions SET attachment=? WHERE id=?", (att, trans_id))
-                                        conn.execute("UPDATE items SET current_balance=current_balance+?, last_updated=? WHERE id=?", (qty, date.today().isoformat(), it['id']))
+                    conn.execute("UPDATE items SET current_balance=current_balance+?, last_updated=? WHERE id=?", (qty, date.today().isoformat(), it['id']))
                     conn.commit()
                     check_and_alert_item(it['id'])
                     st.success(f"تم الحفظ بنجاح (تاريخ الفاتورة: {invoice_date.isoformat()})")
@@ -1761,7 +1749,7 @@ elif choice == "📤 الصادر":
                                 conn.execute("UPDATE items SET current_balance = current_balance - ?, last_updated=? WHERE id=?",
                                              (item_entry['qty'], date.today().isoformat(), item_entry['item_id']))
 
-                                                       conn.commit()
+                            conn.commit()
                             for item_entry in st.session_state.outward_items:
                                 check_and_alert_item(item_entry['item_id'])
                             st.success(f"تم الحفظ بنجاح (تاريخ الإذن: {order_date.isoformat()})")
@@ -1892,7 +1880,7 @@ elif choice == "📝 الجرد":
                              ('تسوية إضافة' if diff > 0 else 'تسوية عجز', it['id'], abs(diff), it['unit_id'], date.today().isoformat(), notes, st.session_state.user['full_name']))
                 st.success(f"تم إضافة حركة {'تسوية إضافة' if diff > 0 else 'تسوية عجز'} بمقدار {abs(diff)}.")
             conn.execute("UPDATE items SET current_balance=?, last_updated=? WHERE id=?", (actual, date.today().isoformat(), it['id']))
-                        conn.execute("INSERT INTO inventory_counts (count_date,item_id,expected_qty,actual_qty,difference,notes,counted_by) VALUES (?,?,?,?,?,?,?)",
+            conn.execute("INSERT INTO inventory_counts (count_date,item_id,expected_qty,actual_qty,difference,notes,counted_by) VALUES (?,?,?,?,?,?,?)",
                          (date.today().isoformat(), it['id'], it['current_balance'], actual, diff, notes, st.session_state.user['full_name']))
             conn.commit()
             check_and_alert_item(it['id'])
