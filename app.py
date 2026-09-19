@@ -1139,7 +1139,7 @@ elif choice == "📦 إدارة الأصناف":
 
         all_items = conn.execute("SELECT i.id, i.item_code, i.name, i.current_balance, i.min_qty, i.max_qty, i.is_active, i.notes, u.unit_symbol FROM items i LEFT JOIN units u ON i.unit_id=u.id ORDER BY i.name").fetchall()
 
-        if all_items:
+                if all_items:
             data = []
             for it in all_items:
                 if search:
@@ -1163,9 +1163,8 @@ elif choice == "📦 إدارة الأصناف":
                 export_buttons(df, "الأصناف", "تقرير الأصناف")
             else:
                 st.info("لا توجد نتائج مطابقة للبحث")
-            else:
-                st.info("لا توجد أصناف مسجلة")
-
+        else:
+            st.info("لا توجد أصناف مسجلة")
     with tab_delete:
         st.subheader("حذف أو تعطيل صنف")
         st.caption("ملاحظة: الصنف اللي فيه حركات سابقة لا يمكن حذفه، لكن يمكن تعطيله فقط.")
