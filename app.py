@@ -21,7 +21,43 @@ try:
     LIBSQL_AVAILABLE = True
 except ImportError:
     LIBSQL_AVAILABLE = False
+# ========== كود فحص مؤقت ==========
+st.warning("🔍 فحص الاتصال بـ Turso:")
 
+try:
+    import libsql as _test_libsql
+    st.write("✅ libsql مثبتة")
+except ImportError:
+    st.error("❌ libsql غير مثبتة")
+
+try:
+    url = st.secrets.get("TURSO_URL", "غير موجود")
+    if url and url != "غير موجود":
+        st.write(f"TURSO_URL يبدأ بـ: `{url[:50]}...`")
+    else:
+        st.error("❌ TURSO_URL غير موجود في Secrets")
+except Exception as e:
+    st.error(f"❌ خطأ في قراءة TURSO_URL: {e}")
+
+try:
+    token = st.secrets.get("TURSO_TOKEN", "غير موجود")
+    if token and token != "غير موجود":
+        st.write(f"TURSO_TOKEN يبدأ بـ: `{token[:20]}...`")
+    else:
+        st.error("❌ TURSO_TOKEN غير موجود في Secrets")
+except Exception as e:
+    st.error(f"❌ خطأ في قراءة TURSO_TOKEN: {e}")
+
+try:
+    test_conn = _test_libsql.connect(database=st.secrets["TURSO_URL"], auth_token=st.secrets["TURSO_TOKEN"])
+    result = test_conn.execute("SELECT COUNT(*) FROM items").fetchone()
+    st.success(f"✅ الاتصال بـ Turso نجح! عدد الأصناف: {result[0]}")
+    test_conn.close()
+except Exception as e:
+    st.error(f"❌ فشل الاتصال بـ Turso: {type(e).__name__}: {e}")
+
+st.stop()
+# ========== نهاية كود الفحص ==========
 # ======================== إعدادات الصفحة ========================
 st.set_page_config(page_title="مخزن النظافة", layout="wide", initial_sidebar_state="collapsed")
 
