@@ -571,8 +571,7 @@ def save_backup_config(cfg):
         pass
 
 
-ALL_TABLES = ['units', 'suppliers', 'items', 'hotels', 'outward_orders', 'transactions', 'inventory_counts', 'expiry_alerts', 'users']
-
+ALL_TABLES = ['units', 'suppliers', 'items', 'hotels', 'outward_orders', 'transactions', 'inventory_counts', 'expiry_alerts', 'users', 'settings']
 
 def create_backup(typ="يدوي", notes=""):
     try:
