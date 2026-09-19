@@ -955,6 +955,17 @@ if st.button("تحديث الاسم"):
         st.success("تم تحديث الاسم")
         st.rerun()
 
+   with st.expander("⚙️ الإعدادات", expanded=False):
+    new_font_size = st.slider("حجم الخط (%)", 50, 200, st.session_state.font_size, step=10, key="global_font")
+    theme_color = st.color_picker("لون البرنامج", st.session_state.theme_color, key="global_theme")
+    new_store_name = st.text_input("اسم المستودع", value=st.session_state.store_name, key="store_name_input")
+
+    if st.button("تحديث الاسم"):
+        st.session_state.store_name = new_store_name
+        set_setting('store_name', new_store_name)
+        st.success("تم تحديث الاسم")
+        st.rerun()
+
     uploaded_logo = st.file_uploader("رفع شعار", type=["png", "jpg", "jpeg"])
     if uploaded_logo is not None:
         b64 = base64.b64encode(uploaded_logo.getbuffer()).decode()
@@ -975,45 +986,17 @@ if st.button("تحديث الاسم"):
         set_setting('font_size', new_font_size)
         set_setting('theme_color', theme_color)
         st.rerun()
-    if st.session_state.logo_path and os.path.exists(st.session_state.logo_path):
-        if st.button("مسح الشعار"):
-            try:
-                os.remove(st.session_state.logo_path)
-            except:
-                pass
-            st.session_state.logo_path = None
-            save_app_config({
-                'font_size': st.session_state.font_size,
-                'theme_color': st.session_state.theme_color,
-                'logo_path': st.session_state.logo_path,
-                'store_name': st.session_state.store_name,
-                'telegram_bot_token': st.session_state.telegram_bot_token,
-                'telegram_chat_id': st.session_state.telegram_chat_id,
-                'telegram_file_id': st.session_state.telegram_file_id
-            })
-            st.rerun()
-    if new_font_size != st.session_state.font_size or theme_color != st.session_state.theme_color:
-        st.session_state.font_size = new_font_size
-        st.session_state.theme_color = theme_color
-        save_app_config({
-            'font_size': st.session_state.font_size,
-            'theme_color': st.session_state.theme_color,
-            'logo_path': st.session_state.logo_path,
-            'store_name': st.session_state.store_name,
-            'telegram_bot_token': st.session_state.telegram_bot_token,
-            'telegram_chat_id': st.session_state.telegram_chat_id,
-            'telegram_file_id': st.session_state.telegram_file_id
-        })
-        st.rerun()
 
     st.subheader("📱 إعداد تيليجرام")
     token_input = st.text_input("Bot Token", value=st.session_state.telegram_bot_token, type="password", key="tg_token")
     chat_input = st.text_input("Chat ID", value=st.session_state.telegram_chat_id, key="tg_chat")
     file_id_input = st.text_input("File ID (اختياري)", value=st.session_state.telegram_file_id, key="tg_file_id")
+
     if st.button("💾 حفظ بيانات تيليجرام"):
         st.session_state.telegram_bot_token = token_input
         st.session_state.telegram_chat_id = chat_input
         st.session_state.telegram_file_id = file_id_input
+        set_setting('telegram_file_id', file_id_input)
         save_app_config({
             'font_size': st.session_state.font_size,
             'theme_color': st.session_state.theme_color,
@@ -1024,7 +1007,6 @@ if st.button("تحديث الاسم"):
             'telegram_file_id': st.session_state.telegram_file_id
         })
         st.success("تم حفظ بيانات تيليجرام")
-
 # ======================== القائمة ========================
 menu = []
 if check_perm():
