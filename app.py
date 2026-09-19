@@ -135,7 +135,11 @@ def init_db():
     conn = get_db()
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS units (id INTEGER PRIMARY KEY AUTOINCREMENT, unit_name TEXT UNIQUE, unit_symbol TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, supplier_name TEXT UNIQUE, contact_info TEXT, notes TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, supplier_name TEXT UNIQUE, contact_info TEXT, notes TEXT, attachments TEXT)''')
+    try:
+        c.execute("ALTER TABLE suppliers ADD COLUMN attachments TEXT")
+    except:
+        pass
     c.execute('''CREATE TABLE IF NOT EXISTS items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         item_code TEXT UNIQUE,
@@ -339,7 +343,7 @@ def save_attachment_to_telegram(uploaded_file, transaction_id):
     url = f"https://api.telegram.org/bot{token}/sendDocument"
     try:
         files = {'document': (uploaded_file.name, uploaded_file.getbuffer(), uploaded_file.type)}
-        data = {'chat_id': chat_id, 'caption': f"مرفق للحركة #{transaction_id}"}
+        data = {'chat_id': chat_id, 'caption': f"مرفق #{transaction_id}"}
         resp = requests.post(url, files=files, data=data, timeout=60)
         if resp.status_code == 200:
             result = resp.json().get('result', {})
@@ -377,7 +381,7 @@ def get_attachment_url(file_id):
 
 
 def display_attachment(file_id, caption="المرفق"):
-    """تعرض المرفق (صورة أو رابط تحميل) من تيليجرام."""
+    """تعرض المرفق (صورة أو رابط تحميل) من تيليجرام أو محلياً."""
     if not file_id:
         return
     # إذا كان المرفق القديم اسم ملف محلي (وليس file_id تيليجرام)
@@ -403,6 +407,41 @@ def display_attachment(file_id, caption="المرفق"):
         st.image(file_url, caption=caption, width=300)
     else:
         st.markdown(f"[📎 تحميل {caption}]({file_url})", unsafe_allow_html=True)
+
+
+# ======================== مرفقات الموردين ========================
+def get_supplier_attachments(supplier_id):
+    """ترجع قائمة مرفقات المورد كـ list of dicts."""
+    conn = get_db()
+    row = conn.execute("SELECT attachments FROM suppliers WHERE id=?", (supplier_id,)).fetchone()
+    conn.close()
+    if row and row['attachments']:
+        try:
+            return json.loads(row['attachments'])
+        except Exception:
+            return []
+    return []
+
+
+def add_supplier_attachment(supplier_id, file_id, file_name):
+    """تضيف مرفقاً جديداً للمورد."""
+    atts = get_supplier_attachments(supplier_id)
+    atts.append({"file_id": file_id, "name": file_name})
+    conn = get_db()
+    conn.execute("UPDATE suppliers SET attachments=? WHERE id=?", (json.dumps(atts, ensure_ascii=False), supplier_id))
+    conn.commit()
+    conn.close()
+
+
+def delete_supplier_attachment(supplier_id, index):
+    """تحذف مرفقاً من المورد."""
+    atts = get_supplier_attachments(supplier_id)
+    if 0 <= index < len(atts):
+        atts.pop(index)
+        conn = get_db()
+        conn.execute("UPDATE suppliers SET attachments=? WHERE id=?", (json.dumps(atts, ensure_ascii=False), supplier_id))
+        conn.commit()
+        conn.close()
 
 
 # ======================== النسخ الاحتياطي ========================
@@ -433,7 +472,6 @@ def create_backup(typ="يدوي", notes=""):
         os.makedirs(path, exist_ok=True)
         
         conn = get_db()
-        # تصدير Excel
         with pd.ExcelWriter(os.path.join(path,'preview.xlsx'), engine='xlsxwriter') as w:
             for t in ALL_TABLES:
                 try:
@@ -446,7 +484,6 @@ def create_backup(typ="يدوي", notes=""):
                 except Exception:
                     pass
         
-        # تصدير SQL (نسخة نصية)
         with open(os.path.join(path, 'data.sql'), 'w', encoding='utf-8') as f:
             for t in ALL_TABLES:
                 try:
@@ -495,18 +532,15 @@ def restore_backup(zip_path):
         
         conn = get_db()
         
-        # الحالة 1: ملف قاعدة بيانات SQLite قديم
         db_src = os.path.join(tmp, DB_NAME)
         if os.path.exists(db_src):
             src = sqlite3.connect(db_src)
             src.row_factory = sqlite3.Row
-            # حذف البيانات الحالية بالترتيب العكسي
             for t in reversed(ALL_TABLES):
                 try:
                     conn.execute(f"DELETE FROM {t}")
                 except Exception:
                     pass
-            # إدخال البيانات بالترتيب الطبيعي
             for t in ALL_TABLES:
                 try:
                     rows = src.execute(f"SELECT * FROM {t}").fetchall()
@@ -522,8 +556,6 @@ def restore_backup(zip_path):
                 except Exception:
                     pass
             src.close()
-        
-        # الحالة 2: ملف Excel حديث
         else:
             excel_path = os.path.join(tmp, 'preview.xlsx')
             if os.path.exists(excel_path):
@@ -1130,7 +1162,7 @@ elif choice == "🏢 الموردين":
     if not check_perm(): st.error("غير مصرح"); st.stop()
     st.header("الموردين")
     conn = get_db()
-    tab1, tab2 = st.tabs(["إضافة","تعديل"])
+    tab1, tab2, tab3 = st.tabs(["إضافة","تعديل","📎 مرفقات الموردين"])
     with tab1:
         with st.form("add_sup"):
             name = st.text_input("اسم المورد")
@@ -1158,6 +1190,47 @@ elif choice == "🏢 الموردين":
                     conn.execute("UPDATE suppliers SET supplier_name=?, contact_info=? WHERE id=?",(new_name, new_info, s['id']))
                     conn.commit(); st.success("تم الحفظ بنجاح"); st.rerun()
         else: st.info("لا يوجد موردين")
+    with tab3:
+        st.subheader("📎 مرفقات الموردين")
+        st.caption("يمكنك رفع بيانات المورد، رقم الحساب، صور بطاقات، أي مستندات.")
+        
+        supps_for_att = conn.execute("SELECT id, supplier_name, attachments FROM suppliers ORDER BY supplier_name").fetchall()
+        if not supps_for_att:
+            st.info("لا يوجد موردين بعد. أضف مورداً أولاً.")
+        else:
+            supplier_names_att = [s['supplier_name'] for s in supps_for_att]
+            selected_sup_name = st.selectbox("اختر المورد", supplier_names_att, key="sup_att_select")
+            selected_sup = next(s for s in supps_for_att if s['supplier_name'] == selected_sup_name)
+            sup_id = selected_sup['id']
+            
+            st.markdown("### المرفقات الحالية")
+            atts = get_supplier_attachments(sup_id)
+            if atts:
+                for i, att in enumerate(atts):
+                    col_a, col_b = st.columns([5, 1])
+                    with col_a:
+                        display_attachment(att['file_id'], att.get('name', 'مرفق'))
+                    with col_b:
+                        if st.button("🗑️ حذف", key=f"del_sup_att_{sup_id}_{i}"):
+                            delete_supplier_attachment(sup_id, i)
+                            st.success("تم الحذف")
+                            st.rerun()
+            else:
+                st.info("لا توجد مرفقات لهذا المورد بعد.")
+            
+            st.divider()
+            st.markdown("### ➕ إضافة مرفق جديد")
+            up_sup = st.file_uploader("اختر ملف", type=["png","jpg","jpeg","pdf","doc","docx","xlsx"], key=f"sup_up_{sup_id}")
+            if up_sup is not None:
+                if st.button("💾 حفظ المرفق", key=f"save_sup_att_{sup_id}", type="primary"):
+                    with st.spinner("جاري رفع المرفق إلى تيليجرام..."):
+                        fid = save_attachment_to_telegram(up_sup, f"supplier_{sup_id}")
+                    if fid:
+                        add_supplier_attachment(sup_id, fid, up_sup.name)
+                        st.success("تم حفظ المرفق بنجاح")
+                        st.rerun()
+                    else:
+                        st.error("فشل رفع المرفق")
     if st.button("🔄 إعادة تحميل الصفحة", key="reload_suppliers"):
         st.rerun()
     conn.close()
@@ -1277,6 +1350,23 @@ elif choice == "📥 الوارد":
                     
                     if rec['attachment']:
                         display_attachment(rec['attachment'], "المرفق")
+                    else:
+                        st.caption("لا يوجد مرفق لهذه الحركة")
+                    
+                    # إضافة/تحديث المرفق
+                    with st.expander("📎 إضافة / تحديث المرفق", expanded=False):
+                        up_att = st.file_uploader("اختر ملف (صورة أو PDF)", type=["png","jpg","jpeg","pdf"], key=f"late_att_{rec['id']}")
+                        if up_att is not None:
+                            if st.button("💾 حفظ المرفق", key=f"save_late_att_{rec['id']}", type="primary"):
+                                with st.spinner("جاري رفع المرفق..."):
+                                    new_fid = save_attachment_to_telegram(up_att, rec['id'])
+                                if new_fid:
+                                    conn.execute("UPDATE transactions SET attachment=? WHERE id=?", (new_fid, rec['id']))
+                                    conn.commit()
+                                    st.success("تم حفظ المرفق بنجاح")
+                                    st.rerun()
+                                else:
+                                    st.error("فشل رفع المرفق")
                     
                     col_btn_print, col_btn_delete = st.columns(2)
                     with col_btn_print:
