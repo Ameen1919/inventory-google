@@ -82,12 +82,89 @@ def apply_theme():
     st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;900&display=swap');
-    *{{font-family:'Tajawal',sans-serif}}
-    html,body,[class*="css"]{{direction:rtl;text-align:right;font-size:{st.session_state.font_size}% !important}}
-    .stApp {{
-        background-color: {st.session_state.theme_color} !important;
-        background-image: linear-gradient(135deg, {st.session_state.theme_color} 0%, #ffffff 100%) !important;
+    
+    *{{font-family:'Tajawal',sans-serif !important}}
+    
+    html, body, [class*="css"], .stApp, .main, .block-container {{
+        direction: rtl !important;
+        text-align: right !important;
+        font-size: {st.session_state.font_size}% !important;
     }}
+    
+    h1, h2, h3, h4, h5, h6,
+    .stMarkdown, .stMarkdown p, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3,
+    [data-testid="stMarkdownContainer"],
+    [data-testid="stMarkdownContainer"] p,
+    [data-testid="stMarkdownContainer"] h1,
+    [data-testid="stMarkdownContainer"] h2,
+    [data-testid="stMarkdownContainer"] h3 {{
+        text-align: right !important;
+        direction: rtl !important;
+    }}
+    
+    .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button {{
+        direction: rtl !important;
+        text-align: center !important;
+        width: 100% !important;
+    }}
+    
+    .stTextInput input, .stNumberInput input, .stTextArea textarea {{
+        direction: rtl !important;
+        text-align: right !important;
+    }}
+    
+    .stSelectbox > div > div,
+    .stMultiSelect > div > div {{
+        direction: rtl !important;
+        text-align: right !important;
+    }}
+    
+    .stTabs [data-baseweb="tab-list"] {{
+        direction: rtl !important;
+    }}
+    
+    .stTabs [data-baseweb="tab"] {{
+        direction: rtl !important;
+    }}
+    
+    [data-testid="stDataFrame"],
+    [data-testid="stTable"] {{
+        direction: rtl !important;
+    }}
+    
+    [data-testid="stDataFrame"] th,
+    [data-testid="stTable"] th,
+    [data-testid="stDataFrame"] td,
+    [data-testid="stTable"] td {{
+        text-align: right !important;
+        direction: rtl !important;
+    }}
+    
+    [data-testid="stMetric"] {{
+        direction: rtl !important;
+        text-align: right !important;
+    }}
+    
+    [data-testid="stMetric"] > div {{
+        text-align: right !important;
+    }}
+    
+    [data-testid="stMetricLabel"],
+    [data-testid="stMetricValue"] {{
+        text-align: right !important;
+        direction: rtl !important;
+    }}
+    
+    .stAlert {{
+        direction: rtl !important;
+        text-align: right !important;
+    }}
+    
+    .streamlit-expanderHeader, [data-testid="stExpander"] summary {{
+        direction: rtl !important;
+        text-align: right !important;
+    }}
+    
     @media (max-width: 768px) {{
         [data-testid="stSidebar"],
         [data-testid="stSidebarCollapsedControl"],
@@ -95,7 +172,17 @@ def apply_theme():
             display: none !important;
         }}
     }}
+    
+    .stApp {{
+        background-color: {st.session_state.theme_color} !important;
+        background-image: linear-gradient(135deg, {st.session_state.theme_color} 0%, #ffffff 100%) !important;
+    }}
+    
+    .stock-critical{{background-color:#ff4444;color:white;padding:5px 10px;border-radius:5px}}
+    .stock-warning{{background-color:#ffbb33;color:black;padding:5px 10px;border-radius:5px}}
+    .stock-good{{background-color:#00C851;color:white;padding:5px 10px;border-radius:5px}}
     </style>""", unsafe_allow_html=True)
+
 apply_theme()
 
 DB_NAME = 'cleaning_inventory.db'
@@ -246,6 +333,34 @@ class WrappedConnection:
         if exc_type is None:
             self.commit()
 
+
+class SQLiteWrapper:
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, *args, **kwargs):
+        return self._conn.execute(*args, **kwargs)
+
+    def cursor(self):
+        return self._conn.cursor()
+
+    def commit(self):
+        try:
+            self._conn.commit()
+        except Exception:
+            pass
+
+    def close(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            self.commit()
+
+
 # ======================== دوال مساعدة ========================
 def hash_password(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
@@ -268,7 +383,7 @@ def get_db():
     if LIBSQL_AVAILABLE and url and token:
         try:
             raw = libsql.connect(database=url, auth_token=token)
-            conn = WrappedConnection(raw)
+            conn = WrappedConnection(raw, url=url, token=token)
             st.session_state._db_conn = conn
             return conn
         except Exception as e:
@@ -279,6 +394,27 @@ def get_db():
     conn = SQLiteWrapper(raw)
     st.session_state._db_conn = conn
     return conn
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cache_items_for_outward():
+    conn = get_db()
+    rows = conn.execute("SELECT id, name, current_balance, unit_id FROM items WHERE is_active=1").fetchall()
+    return [(r['id'], r['name'], r['current_balance'], r['unit_id']) for r in rows]
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cache_hotels():
+    conn = get_db()
+    rows = conn.execute("SELECT id, name, contact_person, phone FROM hotels").fetchall()
+    return [(r['id'], r['name'], r['contact_person'], r['phone']) for r in rows]
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cache_units_map():
+    conn = get_db()
+    rows = conn.execute("SELECT id, unit_symbol FROM units").fetchall()
+    return {r['id']: r['unit_symbol'] for r in rows}
 
 
 @st.cache_resource
@@ -294,7 +430,7 @@ def _ensure_db_initialized():
     if LIBSQL_AVAILABLE and _url and _token:
         try:
             raw = libsql.connect(database=_url, auth_token=_token)
-            conn = WrappedConnection(raw, url=url, token=token)
+            _conn = WrappedConnection(raw, url=_url, token=_token)
         except Exception:
             raw = sqlite3.connect(DB_NAME)
             raw.row_factory = sqlite3.Row
@@ -1014,6 +1150,8 @@ elif has_role('disbursement'):
     menu = ["📊 لوحة التحكم", "📤 الصادر", "📈 التقارير"]
 elif has_role('supervisor'):
     menu = ["📊 لوحة التحكم", "📝 الجرد", "📈 التقارير"]
+elif has_role('auditor'):
+    menu = ["📊 لوحة التحكم", "📈 التقارير"]
 
 choice = st.selectbox("القائمة", menu, index=0)
 
@@ -1165,6 +1303,7 @@ elif choice == "📦 إدارة الأصناف":
                 st.info("لا توجد نتائج مطابقة للبحث")
         else:
             st.info("لا توجد أصناف مسجلة")
+
     with tab_delete:
         st.subheader("حذف أو تعطيل صنف")
         st.caption("ملاحظة: الصنف اللي فيه حركات سابقة لا يمكن حذفه، لكن يمكن تعطيله فقط.")
@@ -1230,6 +1369,7 @@ elif choice == "📦 إدارة الأصناف":
                 with col_btn3:
                     if st.button("🔄 إعادة تحميل", key=f"reload_item_{selected['id']}"):
                         st.rerun()
+
 elif choice == "📏 الوحدات":
     if not check_perm():
         st.error("غير مصرح")
@@ -1585,12 +1725,33 @@ elif choice == "📤 الصادر":
     with tab_out1:
         st.subheader("إنشاء إذن صرف جديد")
         conn = get_db()
-        items = conn.execute("SELECT id, name, current_balance, unit_id FROM items WHERE is_active=1").fetchall()
-        hotels = conn.execute("SELECT id, name, contact_person, phone FROM hotels").fetchall()
+
+        col_refresh, _ = st.columns([1, 4])
+        with col_refresh:
+            if st.button("🔄 تحديث البيانات", key="refresh_outward_data"):
+                _cache_items_for_outward.clear()
+                _cache_hotels.clear()
+                _cache_units_map.clear()
+                st.success("تم التحديث")
+                st.rerun()
+
+        _cached_items = _cache_items_for_outward()
+        _cached_hotels = _cache_hotels()
+        items = [{'id': r[0], 'name': r[1], 'current_balance': r[2], 'unit_id': r[3]} for r in _cached_items]
+        hotels = [{'id': r[0], 'name': r[1], 'contact_person': r[2], 'phone': r[3]} for r in _cached_hotels]
+
         if not items or not hotels:
             st.warning("يجب إضافة أصناف وفنادق أولاً")
         else:
-            item_options = [f"{it['name']} (الرصيد: {it['current_balance']})" for it in items]
+            added_qty = {}
+            for entry in st.session_state.get('outward_items', []):
+                added_qty[entry['item_id']] = added_qty.get(entry['item_id'], 0) + entry['qty']
+
+            item_options = []
+            for it in items:
+                effective_balance = it['current_balance'] - added_qty.get(it['id'], 0)
+                item_options.append(f"{it['name']} (المتاح: {effective_balance})")
+
             if 'outward_items' not in st.session_state:
                 st.session_state.outward_items = []
             if 'outward_form_defaults' not in st.session_state:
@@ -1616,11 +1777,12 @@ elif choice == "📤 الصادر":
                     if qty <= 0:
                         st.error("الكمية يجب أن تكون أكبر من صفر")
                     else:
-                        item_name = selected_item_str.split(" (الرصيد:")[0]
+                        item_name = selected_item_str.split(" (المتاح:")[0]
                         it = next((i for i in items if i['name'] == item_name), None)
                         if it:
-                            if qty > it['current_balance']:
-                                st.error(f"الرصيد غير كافٍ ({it['current_balance']})")
+                            effective = it['current_balance'] - added_qty.get(it['id'], 0)
+                            if qty > effective:
+                                st.error(f"الرصيد غير كافٍ (المتاح: {effective})")
                             else:
                                 st.session_state.outward_items.append({
                                     'item_id': it['id'],
@@ -1642,8 +1804,7 @@ elif choice == "📤 الصادر":
             if st.session_state.outward_items:
                 st.subheader("الأصناف في الإذن الحالي")
                 df_current = pd.DataFrame(st.session_state.outward_items)
-                units = conn.execute("SELECT id, unit_symbol FROM units").fetchall()
-                unit_dict_out = {u['id']: u['unit_symbol'] for u in units}
+                unit_dict_out = _cache_units_map()
                 df_current['الوحدة'] = df_current['unit_id'].map(unit_dict_out)
                 df_display = df_current[['item_name', 'qty', 'الوحدة']].copy()
                 df_display.columns = ['الصنف', 'الكمية', 'الوحدة']
@@ -1712,6 +1873,9 @@ elif choice == "📤 الصادر":
                             conn.commit()
                             for item_entry in st.session_state.outward_items:
                                 check_and_alert_item(item_entry['item_id'])
+                            _cache_items_for_outward.clear()
+                            _cache_hotels.clear()
+                            _cache_units_map.clear()
                             st.success(f"تم الحفظ بنجاح (تاريخ الإذن: {order_date.isoformat()})")
                             st.session_state.outward_form_defaults = {
                                 'hotel': selected_hotel,
@@ -2029,7 +2193,7 @@ elif choice == "👥 المستخدمين":
         un = st.text_input("اسم المستخدم")
         pw = st.text_input("كلمة المرور", type="password")
         fn = st.text_input("الاسم الكامل")
-        role = st.selectbox("الدور", ['super_admin', 'purchasing', 'disbursement', 'supervisor'])
+        role = st.selectbox("الدور", ['super_admin', 'purchasing', 'disbursement', 'supervisor', 'auditor'])
         if st.form_submit_button("إضافة"):
             try:
                 conn.execute("INSERT INTO users (username,password,role,full_name) VALUES (?,?,?,?)", (un, hash_password(pw), role, fn))
