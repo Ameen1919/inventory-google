@@ -113,27 +113,18 @@ def apply_theme():
         text-align: right !important;
     }}
     
-    /* ========== إخفاء "keyboard_ar" وكل اختصارات لوحة المفاتيح ========== */
+    /* إخفاء keyboard_ar واختصارات لوحة المفاتيح */
     [data-testid="InputInstructions"],
     [data-testid="stTextInputRootElement"] > div + div,
     [data-testid="stTextInput"] small,
     [data-testid="stNumberInput"] small,
     [data-testid="stTextArea"] small,
-    .stTextInput small,
-    .stTextArea small,
-    .stNumberInput small,
-    input ~ small,
-    input + small,
-    textarea ~ small,
-    textarea + small,
-    [class*="keyboard"],
-    [class*="Keyboard"],
-    [class*="shortcut"],
-    [class*="Shortcut"],
-    [aria-label*="keyboard"],
-    [aria-label*="Keyboard"],
-    [title*="keyboard"],
-    [title*="Keyboard"] {{
+    .stTextInput small, .stTextArea small, .stNumberInput small,
+    input ~ small, input + small, textarea ~ small, textarea + small,
+    [class*="keyboard"], [class*="Keyboard"],
+    [class*="shortcut"], [class*="Shortcut"],
+    [aria-label*="keyboard"], [aria-label*="Keyboard"],
+    [title*="keyboard"], [title*="Keyboard"] {{
         display: none !important;
         visibility: hidden !important;
         opacity: 0 !important;
@@ -142,11 +133,20 @@ def apply_theme():
         pointer-events: none !important;
     }}
     
-    /* ========== إصلاح التبويبات ========== */
+    /* ========== التبويبات على اليمين ========== */
     .stTabs [data-baseweb="tab-list"] {{
         direction: rtl !important;
+        justify-content: flex-start !important;
         gap: 12px !important;
         flex-wrap: wrap !important;
+    }}
+    
+    .stTabs [data-baseweb="tab-highlight"] {{
+        display: none !important;
+    }}
+    
+    .stTabs [data-baseweb="tab-border"] {{
+        display: none !important;
     }}
     
     .stTabs [data-baseweb="tab"] {{
@@ -156,6 +156,17 @@ def apply_theme():
         border-radius: 8px !important;
         font-weight: 500 !important;
         min-width: fit-content !important;
+        background-color: rgba(255, 255, 255, 0.5) !important;
+        border: 1px solid rgba(0, 0, 0, 0.1) !important;
+    }}
+    
+    .stTabs [data-baseweb="tab"]:hover {{
+        background-color: rgba(255, 255, 255, 0.8) !important;
+    }}
+    
+    .stTabs [aria-selected="true"] {{
+        background-color: {st.session_state.theme_color} !important;
+        color: white !important;
     }}
     
     .stTabs [data-baseweb="tab"] > div {{
@@ -165,6 +176,31 @@ def apply_theme():
     .stTabs [data-baseweb="tab"] p {{
         white-space: nowrap !important;
         margin: 0 !important;
+    }}
+    
+    /* ========== الجداول من اليمين ========== */
+    [data-testid="stDataFrame"],
+    [data-testid="stTable"],
+    [data-testid="stDataFrameResizable"] {{
+        direction: rtl !important;
+    }}
+    
+    [data-testid="stDataFrame"] div[role="columnheader"],
+    [data-testid="stTable"] thead th {{
+        direction: rtl !important;
+        text-align: right !important;
+    }}
+    
+    [data-testid="stDataFrame"] div[role="gridcell"],
+    [data-testid="stTable"] tbody td {{
+        direction: rtl !important;
+        text-align: right !important;
+    }}
+    
+    /* عكس ترتيب الأعمدة في الجدول */
+    [data-testid="stDataFrame"] div[role="row"],
+    [data-testid="stTable"] tr {{
+        direction: rtl !important;
     }}
     
     /* خلفية التطبيق */
@@ -182,7 +218,6 @@ def apply_theme():
         }}
     }}
     </style>""", unsafe_allow_html=True)
-
 
 apply_theme()
 
