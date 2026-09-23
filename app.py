@@ -85,30 +85,14 @@ def apply_theme():
     
     *{{font-family:'Tajawal',sans-serif !important}}
     
-    html, body {{
-        direction: rtl !important;
-        text-align: right !important;
-    }}
-    
-    .stApp, .main, .block-container {{
-        direction: rtl !important;
-        text-align: right !important;
-    }}
-    
-    h1, h2, h3, h4, h5, h6,
-    .stMarkdown, .stMarkdown p, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3,
+    .stMarkdown, .stMarkdown p, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4,
     [data-testid="stMarkdownContainer"],
     [data-testid="stMarkdownContainer"] p,
     [data-testid="stMarkdownContainer"] h1,
     [data-testid="stMarkdownContainer"] h2,
     [data-testid="stMarkdownContainer"] h3 {{
+        direction: rtl !important;
         text-align: right !important;
-        direction: rtl !important;
-    }}
-    
-    .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button {{
-        direction: rtl !important;
-        text-align: center !important;
     }}
     
     .stTextInput input, .stNumberInput input, .stTextArea textarea {{
@@ -116,42 +100,15 @@ def apply_theme():
         text-align: right !important;
     }}
     
-    .stSelectbox > div > div,
-    .stMultiSelect > div > div {{
+    .stSelectbox [data-baseweb="select"] > div,
+    .stMultiSelect [data-baseweb="select"] > div {{
         direction: rtl !important;
         text-align: right !important;
     }}
     
-    .stTabs [data-baseweb="tab-list"] {{
-        direction: rtl !important;
-    }}
-    
-    .stTabs [data-baseweb="tab"] {{
-        direction: rtl !important;
-    }}
-    
-    [data-testid="stDataFrame"],
-    [data-testid="stTable"] {{
-        direction: rtl !important;
-    }}
-    
-    [data-testid="stDataFrame"] th,
-    [data-testid="stTable"] th,
-    [data-testid="stDataFrame"] td,
-    [data-testid="stTable"] td {{
-        text-align: right !important;
-        direction: rtl !important;
-    }}
-    
-    [data-testid="stMetric"] {{
+    [data-testid="stMetric"] div {{
         direction: rtl !important;
         text-align: right !important;
-    }}
-    
-    [data-testid="stMetricLabel"],
-    [data-testid="stMetricValue"] {{
-        text-align: right !important;
-        direction: rtl !important;
     }}
     
     .stAlert {{
@@ -159,9 +116,20 @@ def apply_theme():
         text-align: right !important;
     }}
     
-    .streamlit-expanderHeader, [data-testid="stExpander"] summary {{
+    .stTabs [data-baseweb="tab"] {{
         direction: rtl !important;
-        text-align: right !important;
+    }}
+    
+    [data-testid="stExpander"] summary svg[title],
+    [data-testid="stExpander"] summary [title="keyboard"],
+    [data-testid="stExpanderToggleIcon"] svg,
+    [data-testid="stExpander"] summary > svg:last-child {{
+        display: none !important;
+    }}
+    
+    .stApp {{
+        background-color: {st.session_state.theme_color} !important;
+        background-image: linear-gradient(135deg, {st.session_state.theme_color} 0%, #ffffff 100%) !important;
     }}
     
     @media (max-width: 768px) {{
@@ -171,15 +139,6 @@ def apply_theme():
             display: none !important;
         }}
     }}
-    
-    .stApp {{
-        background-color: {st.session_state.theme_color} !important;
-        background-image: linear-gradient(135deg, {st.session_state.theme_color} 0%, #ffffff 100%) !important;
-    }}
-    
-    .stock-critical{{background-color:#ff4444;color:white;padding:5px 10px;border-radius:5px}}
-    .stock-warning{{background-color:#ffbb33;color:black;padding:5px 10px;border-radius:5px}}
-    .stock-good{{background-color:#00C851;color:white;padding:5px 10px;border-radius:5px}}
     </style>""", unsafe_allow_html=True)
 
 apply_theme()
@@ -1661,7 +1620,7 @@ elif choice == "📥 الوارد":
                         st.info("لا توجد تعديلات متراجع عنها لتقديمها")
 
     with tab_in2:
-        st.subheader("سجل المشتريات")
+        st.subheader("📋 سجل المشتريات")
         conn = get_db()
 
         col_f1, col_f2 = st.columns(2)
@@ -1680,88 +1639,191 @@ elif choice == "📥 الوارد":
             ORDER BY t.id DESC
         """, (start_date.isoformat(), end_date.isoformat())).fetchall()
 
-        if inward_records:
-            for rec in inward_records:
-                with st.expander(f"📦 وارد #{rec['id']} - {rec['item_name']} ({rec['qty']} {rec['unit_symbol']}) - {rec['transaction_date']}"):
-                    col_det1, col_det2 = st.columns(2)
-                    with col_det1:
-                        st.write(f"**رقم الحركة:** {rec['id']}")
-                        st.write(f"**الصنف:** {rec['item_name']}")
-                        st.write(f"**الكمية:** {rec['qty']} {rec['unit_symbol']}")
-                        if rec['supplier_name']:
-                            st.write(f"**المورد:** {rec['supplier_name']}")
-                        if rec['unit_price']:
-                            st.write(f"**سعر الوحدة:** {rec['unit_price']:.2f}")
-                    with col_det2:
-                        st.write(f"**التاريخ:** {rec['transaction_date']}")
-                        st.write(f"**ملاحظات:** {rec['notes'] or 'لا يوجد'}")
-
-                    if rec['attachment']:
-                        display_attachment(rec['attachment'], "المرفق")
-                    else:
-                        st.caption("لا يوجد مرفق لهذه الحركة")
-
-                    with st.expander("📎 إضافة / تحديث المرفق", expanded=False):
-                        up_att = st.file_uploader("اختر ملف (صورة أو PDF)", type=["png", "jpg", "jpeg", "pdf"], key=f"late_att_{rec['id']}")
-                        if up_att is not None:
-                            if st.button("💾 حفظ المرفق", key=f"save_late_att_{rec['id']}", type="primary"):
-                                with st.spinner("جاري رفع المرفق..."):
-                                    new_fid = save_attachment_to_telegram(up_att, rec['id'])
-                                if new_fid:
-                                    conn.execute("UPDATE transactions SET attachment=? WHERE id=?", (new_fid, rec['id']))
-                                    conn.commit()
-                                    st.success("تم حفظ المرفق بنجاح")
-                                    st.rerun()
-                                else:
-                                    st.error("فشل رفع المرفق")
-
-                    col_btn_print, col_btn_delete = st.columns(2)
-                    with col_btn_print:
-                        if st.button(f"🖨️ طباعة #{rec['id']}", key=f"print_in_{rec['id']}"):
-                            font_path = get_arabic_font()
-                            pdf = FPDF()
-                            pdf.add_page()
-                            if font_path:
-                                pdf.add_font("Amiri", fname=font_path)
-                                pdf.set_font("Amiri", size=16)
-                            else:
-                                pdf.set_font("Helvetica", size=16)
-                            pdf.cell(0, 10, shape_arabic("إذن استلام مشتريات"), ln=True, align='C')
-                            pdf.ln(10)
-                            pdf.set_font("Amiri", size=12) if font_path else pdf.set_font("Helvetica", size=12)
-                            pdf.cell(0, 8, shape_arabic(f"رقم الإذن: IN-{rec['id']}"), ln=True, align='R')
-                            pdf.cell(0, 8, shape_arabic(f"التاريخ: {rec['transaction_date']}"), ln=True, align='R')
-                            pdf.cell(0, 8, shape_arabic(f"الصنف: {rec['item_name']}"), ln=True, align='R')
-                            pdf.cell(0, 8, shape_arabic(f"الكمية: {rec['qty']} {rec['unit_symbol']}"), ln=True, align='R')
-                            if rec['supplier_name']:
-                                pdf.cell(0, 8, shape_arabic(f"المورد: {rec['supplier_name']}"), ln=True, align='R')
-                            if rec['unit_price']:
-                                pdf.cell(0, 8, shape_arabic(f"سعر الوحدة: {rec['unit_price']:.2f}"), ln=True, align='R')
-                            pdf.cell(0, 8, shape_arabic(f"ملاحظات: {rec['notes'] or 'لا يوجد'}"), ln=True, align='R')
-                            pdf.ln(10)
-                            pdf.cell(0, 10, shape_arabic("توقيع أمين المخزن: ________________"), ln=True, align='R')
-
-                            pdf_bytes = bytes(pdf.output())
-                            st.download_button(f"📥 تحميل PDF الإذن #{rec['id']}", data=pdf_bytes,
-                                               file_name=f"Purchase_Order_{rec['id']}.pdf", mime="application/pdf")
-
-                    with col_btn_delete:
-                        if st.button(f"🗑️ حذف #{rec['id']}", key=f"del_in_{rec['id']}"):
-                            if st.session_state.get(f"confirm_del_in_{rec['id']}", False):
-                                success, msg = delete_transaction(rec['id'])
-                                if success:
-                                    st.success(msg)
-                                    _clear_all_caches()
-                                    st.session_state[f"confirm_del_in_{rec['id']}"] = False
-                                    st.rerun()
-                                else:
-                                    st.error(msg)
-                            else:
-                                st.session_state[f"confirm_del_in_{rec['id']}"] = True
-                                st.warning("⚠️ اضغط مرة أخرى لتأكيد الحذف (سيتم خصم الكمية من المخزون).")
-                                st.rerun()
-        else:
+        if not inward_records:
             st.info("لا توجد مشتريات في هذه الفترة")
+        else:
+            table_data = []
+            total_value = 0
+            for rec in inward_records:
+                has_attach = "📎" if rec['attachment'] else ""
+                value = (rec['qty'] or 0) * (rec['unit_price'] or 0)
+                total_value += value
+                table_data.append({
+                    'الرقم': rec['id'],
+                    'التاريخ': rec['transaction_date'],
+                    'الصنف': rec['item_name'],
+                    'الكمية': f"{rec['qty']} {rec['unit_symbol'] or ''}",
+                    'المورد': rec['supplier_name'] or '-',
+                    'سعر الوحدة': f"{rec['unit_price']:.2f}" if rec['unit_price'] else '-',
+                    'الإجمالي': f"{value:.2f}" if value else '-',
+                    'مرفق': has_attach,
+                })
+
+            df_summary = pd.DataFrame(table_data)
+
+            with st.expander("🎨 تنسيق الجدول", expanded=False):
+                font_scale_in = st.slider("حجم الخط (%)", 50, 200, 100, 10, key="in_log_font")
+                color_in = st.selectbox("لون الجدول", ["افتراضي", "أخضر", "أزرق", "رمادي", "برتقالي"], key="in_log_color")
+                color_map_in = {"افتراضي": "#f0f2f6", "أخضر": "#e6ffe6", "أزرق": "#e6f0ff", "رمادي": "#f5f5f5", "برتقالي": "#fff3e6"}
+                bg_in = color_map_in.get(color_in, "#f0f2f6")
+
+            st.dataframe(df_summary, use_container_width=True, hide_index=True)
+            st.markdown(apply_table_styling(font_scale_in, bg_in), unsafe_allow_html=True)
+
+            col_sum1, col_sum2 = st.columns(2)
+            with col_sum1:
+                st.markdown(f"**📊 عدد الحركات:** `{len(inward_records)}`")
+            with col_sum2:
+                st.markdown(f"**💰 إجمالي القيمة:** `{total_value:.2f}`")
+
+            export_buttons(df_summary, "سجل_المشتريات", "تقرير سجل المشتريات")
+
+            st.divider()
+            st.subheader("🔍 عرض تفاصيل حركة")
+
+            record_options = [f"#{rec['id']} - {rec['item_name']} - {rec['transaction_date']} ({rec['qty']} {rec['unit_symbol'] or ''})" for rec in inward_records]
+            selected_option = st.selectbox("اختر الحركة لعرض التفاصيل", record_options, key="inward_detail_select")
+            selected_idx = record_options.index(selected_option)
+            rec = inward_records[selected_idx]
+
+            st.divider()
+            col_det1, col_det2 = st.columns(2)
+            with col_det1:
+                st.write(f"**رقم الحركة:** {rec['id']}")
+                st.write(f"**الصنف:** {rec['item_name']}")
+                st.write(f"**الكمية:** {rec['qty']} {rec['unit_symbol'] or ''}")
+                if rec['supplier_name']:
+                    st.write(f"**المورد:** {rec['supplier_name']}")
+                if rec['unit_price']:
+                    st.write(f"**سعر الوحدة:** {rec['unit_price']:.2f}")
+                    st.write(f"**الإجمالي:** {rec['qty'] * rec['unit_price']:.2f}")
+            with col_det2:
+                st.write(f"**التاريخ:** {rec['transaction_date']}")
+                st.write(f"**ملاحظات:** {rec['notes'] or 'لا يوجد'}")
+
+            if rec['attachment']:
+                display_attachment(rec['attachment'], "المرفق")
+            else:
+                st.caption("لا يوجد مرفق لهذه الحركة")
+
+            with st.expander("📎 إضافة / تحديث المرفق", expanded=False):
+                up_att = st.file_uploader("اختر ملف (صورة أو PDF)", type=["png", "jpg", "jpeg", "pdf"], key=f"late_att_{rec['id']}")
+                if up_att is not None:
+                    if st.button("💾 حفظ المرفق", key=f"save_late_att_{rec['id']}", type="primary"):
+                        with st.spinner("جاري رفع المرفق..."):
+                            new_fid = save_attachment_to_telegram(up_att, rec['id'])
+                        if new_fid:
+                            conn.execute("UPDATE transactions SET attachment=? WHERE id=?", (new_fid, rec['id']))
+                            conn.commit()
+                            st.success("تم حفظ المرفق بنجاح")
+                            st.rerun()
+                        else:
+                            st.error("فشل رفع المرفق")
+
+            st.divider()
+            col_btn_print, col_btn_edit, col_btn_delete = st.columns(3)
+
+            with col_btn_print:
+                if st.button(f"🖨️ طباعة PDF", key=f"print_in_{rec['id']}", type="primary"):
+                    font_path = get_arabic_font()
+                    pdf = FPDF()
+                    pdf.add_page()
+                    if font_path:
+                        pdf.add_font("Amiri", fname=font_path)
+                        pdf.set_font("Amiri", size=16)
+                    else:
+                        pdf.set_font("Helvetica", size=16)
+                    pdf.cell(0, 10, shape_arabic("إذن استلام مشتريات"), ln=True, align='C')
+                    pdf.ln(10)
+                    pdf.set_font("Amiri", size=12) if font_path else pdf.set_font("Helvetica", size=12)
+                    pdf.cell(0, 8, shape_arabic(f"رقم الإذن: IN-{rec['id']}"), ln=True, align='R')
+                    pdf.cell(0, 8, shape_arabic(f"التاريخ: {rec['transaction_date']}"), ln=True, align='R')
+                    pdf.cell(0, 8, shape_arabic(f"الصنف: {rec['item_name']}"), ln=True, align='R')
+                    pdf.cell(0, 8, shape_arabic(f"الكمية: {rec['qty']} {rec['unit_symbol'] or ''}"), ln=True, align='R')
+                    if rec['supplier_name']:
+                        pdf.cell(0, 8, shape_arabic(f"المورد: {rec['supplier_name']}"), ln=True, align='R')
+                    if rec['unit_price']:
+                        pdf.cell(0, 8, shape_arabic(f"سعر الوحدة: {rec['unit_price']:.2f}"), ln=True, align='R')
+                        pdf.cell(0, 8, shape_arabic(f"الإجمالي: {rec['qty'] * rec['unit_price']:.2f}"), ln=True, align='R')
+                    pdf.cell(0, 8, shape_arabic(f"ملاحظات: {rec['notes'] or 'لا يوجد'}"), ln=True, align='R')
+                    pdf.ln(10)
+                    pdf.cell(0, 10, shape_arabic("توقيع أمين المخزن: ________________"), ln=True, align='R')
+
+                    pdf_bytes = bytes(pdf.output())
+                    st.download_button(f"📥 تحميل PDF", data=pdf_bytes,
+                                       file_name=f"Purchase_Order_{rec['id']}.pdf", mime="application/pdf")
+
+            with col_btn_edit:
+                if st.button(f"✏️ تعديل", key=f"edit_in_{rec['id']}"):
+                    st.session_state[f"editing_in_{rec['id']}"] = True
+                    st.rerun()
+
+            with col_btn_delete:
+                if st.button(f"🗑️ حذف #{rec['id']}", key=f"del_in_{rec['id']}"):
+                    if st.session_state.get(f"confirm_del_in_{rec['id']}", False):
+                        success, msg = delete_transaction(rec['id'])
+                        if success:
+                            st.success(msg)
+                            _clear_all_caches()
+                            st.session_state[f"confirm_del_in_{rec['id']}"] = False
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                    else:
+                        st.session_state[f"confirm_del_in_{rec['id']}"] = True
+                        st.warning("⚠️ اضغط مرة أخرى لتأكيد الحذف")
+                        st.rerun()
+
+            if st.session_state.get(f"editing_in_{rec['id']}", False):
+                with st.form(key=f"edit_form_in_{rec['id']}"):
+                    st.markdown("---")
+                    st.subheader(f"✏️ تعديل الوارد #{rec['id']}")
+                    items_list = conn.execute("SELECT id, name, unit_id FROM items WHERE is_active=1").fetchall()
+                    current_item_index = [i['id'] for i in items_list].index(rec['item_id']) if rec['item_id'] in [i['id'] for i in items_list] else 0
+                    new_item = st.selectbox("الصنف", [i['name'] for i in items_list], index=current_item_index)
+                    new_qty = st.number_input("الكمية", min_value=0.1, value=float(rec['qty']))
+                    suppliers_list = conn.execute("SELECT id, supplier_name FROM suppliers ORDER BY supplier_name").fetchall()
+                    supplier_options_edit = [s['supplier_name'] for s in suppliers_list]
+                    if supplier_options_edit:
+                        current_supplier = rec['supplier_name'] if rec['supplier_name'] in supplier_options_edit else supplier_options_edit[0]
+                        new_supplier = st.selectbox("المورد", supplier_options_edit, index=supplier_options_edit.index(current_supplier))
+                    else:
+                        new_supplier = ""
+                    new_unit_price = st.number_input("سعر الوحدة", min_value=0.0, value=float(rec['unit_price'] or 0), step=0.01)
+                    try:
+                        d_val = datetime.strptime(rec['transaction_date'], '%Y-%m-%d').date()
+                    except Exception:
+                        d_val = date.today()
+                    new_invoice_date = st.date_input("تاريخ الفاتورة", value=d_val)
+                    new_notes = st.text_input("ملاحظات", value=rec['notes'] or "")
+                    new_attachment = st.file_uploader("📎 استبدال المرفق (اختياري)", type=["png", "jpg", "jpeg", "pdf"])
+
+                    col_save, col_cancel = st.columns(2)
+                    with col_save:
+                        save_edit = st.form_submit_button("💾 حفظ التعديلات", type="primary")
+                    with col_cancel:
+                        cancel_edit = st.form_submit_button("❌ إلغاء")
+
+                    if save_edit:
+                        old_item_id = rec['item_id']
+                        new_item_data = next((i for i in items_list if i['name'] == new_item), None)
+                        conn.execute("UPDATE items SET current_balance = current_balance - ?, last_updated=? WHERE id=?", (rec['qty'], date.today().isoformat(), old_item_id))
+                        conn.execute("UPDATE items SET current_balance = current_balance + ?, last_updated=? WHERE id=?", (new_qty, date.today().isoformat(), new_item_data['id']))
+                        attachment_name = rec['attachment']
+                        if new_attachment:
+                            attachment_name = save_attachment_to_telegram(new_attachment, rec['id'])
+                        conn.execute("""UPDATE transactions SET item_id=?, qty=?, unit_id=?, supplier_name=?, unit_price=?, transaction_date=?, notes=?, attachment=?
+                                      WHERE id=?""",
+                                     (new_item_data['id'], new_qty, new_item_data['unit_id'], new_supplier, new_unit_price, new_invoice_date.isoformat(), new_notes, attachment_name, rec['id']))
+                        conn.commit()
+                        _clear_all_caches()
+                        st.success("تم تعديل الوارد بنجاح")
+                        st.session_state[f"editing_in_{rec['id']}"] = False
+                        st.rerun()
+
+                    if cancel_edit:
+                        st.session_state[f"editing_in_{rec['id']}"] = False
+                        st.rerun()
 
 elif choice == "📤 الصادر":
     tab_out1, tab_out2 = st.tabs(["📝 إنشاء إذن صرف", "📋 سجل أذون الصرف"])
@@ -1937,7 +1999,7 @@ elif choice == "📤 الصادر":
                     st.rerun()
 
     with tab_out2:
-        st.subheader("سجل أذون الصرف")
+        st.subheader("📋 سجل أذون الصرف")
         conn = get_db()
 
         col_f1, col_f2 = st.columns(2)
@@ -1954,94 +2016,130 @@ elif choice == "📤 الصادر":
             ORDER BY o.id DESC
         """, (start_date.isoformat(), end_date.isoformat())).fetchall()
 
-        if orders:
-            for order in orders:
-                with st.expander(f"📋 إذن {order['order_number']} - {order['hotel_name']} - {order['order_date']}"):
-                    st.write(f"**رقم الإذن:** {order['order_number']}")
-                    st.write(f"**التاريخ:** {order['order_date']}")
-                    st.write(f"**الفندق:** {order['hotel_name']}")
-                    st.write(f"**مسؤول الاستلام:** {order['recipient_name']}")
-                    st.write(f"**ملاحظات:** {order['notes'] or 'لا يوجد'}")
-
-                    items_in_order = conn.execute("""
-                        SELECT i.name, t.qty, u.unit_symbol
-                        FROM transactions t
-                        JOIN items i ON t.item_id = i.id
-                        LEFT JOIN units u ON t.unit_id = u.id
-                        WHERE t.order_id = ? AND t.transaction_type = 'صادر'
-                    """, (order['id'],)).fetchall()
-
-                    if items_in_order:
-                        st.write("**الأصناف المصروفة:**")
-                        df_items = pd.DataFrame([list(r) for r in items_in_order], columns=['الصنف', 'الكمية', 'الوحدة'])
-                        st.dataframe(df_items, use_container_width=True)
-
-                    col_btn_print, col_btn_delete = st.columns(2)
-                    with col_btn_print:
-                        if st.button(f"🖨️ طباعة PDF {order['order_number']}", key=f"print_out_{order['id']}"):
-                            font_path = get_arabic_font()
-                            pdf = FPDF()
-                            pdf.add_page()
-                            if font_path:
-                                pdf.add_font("Amiri", fname=font_path)
-                                pdf.set_font("Amiri", size=16)
-                            else:
-                                pdf.set_font("Helvetica", size=16)
-                            pdf.cell(0, 10, shape_arabic("إذن صرف مخزني"), ln=True, align='C')
-                            pdf.ln(5)
-                            pdf.set_font("Amiri", size=12) if font_path else pdf.set_font("Helvetica", size=12)
-                            pdf.cell(0, 8, shape_arabic(f"رقم الإذن: {order['order_number']}"), ln=True, align='R')
-                            pdf.cell(0, 8, shape_arabic(f"التاريخ: {order['order_date']}"), ln=True, align='R')
-                            pdf.cell(0, 8, shape_arabic(f"الفندق: {order['hotel_name']}"), ln=True, align='R')
-                            pdf.cell(0, 8, shape_arabic(f"مسؤول الاستلام: {order['recipient_name']}"), ln=True, align='R')
-                            pdf.ln(5)
-                            pdf.set_fill_color(0, 168, 107)
-                            pdf.set_text_color(255, 255, 255)
-                            pdf.cell(30, 10, shape_arabic("الوحدة"), border=1, fill=True, align='C')
-                            pdf.cell(30, 10, shape_arabic("الكمية"), border=1, fill=True, align='C')
-                            pdf.cell(100, 10, shape_arabic("الصنف"), border=1, fill=True, align='C')
-                            pdf.ln()
-                            pdf.set_text_color(0, 0, 0)
-                            pdf.set_font("Amiri", size=10) if font_path else pdf.set_font("Helvetica", size=10)
-                            for item in items_in_order:
-                                pdf.cell(30, 8, shape_arabic(item['unit_symbol'] or ''), border=1, align='C')
-                                pdf.cell(30, 8, shape_arabic(str(item['qty'])), border=1, align='C')
-                                pdf.cell(100, 8, shape_arabic(item['name']), border=1, align='C')
-                                pdf.ln()
-                            pdf.ln(10)
-                            pdf.cell(0, 10, shape_arabic(f"توقيع مسؤول الاستلام ({order['recipient_name']}): ________________"), ln=True, align='R')
-                            pdf.cell(0, 10, shape_arabic("توقيع أمين المخزن: ________________"), ln=True, align='R')
-
-                            pdf_bytes = bytes(pdf.output())
-                            st.download_button(f"📥 تحميل PDF {order['order_number']}", data=pdf_bytes,
-                                               file_name=f"{order['order_number']}.pdf", mime="application/pdf")
-                    with col_btn_delete:
-                        if st.button(f"🗑️ حذف الإذن {order['order_number']}", key=f"del_out_{order['id']}"):
-                            if st.session_state.get(f"confirm_del_out_{order['id']}", False):
-                                success, msg = delete_outward_order(order['id'])
-                                if success:
-                                    st.success(msg)
-                                    _clear_all_caches()
-                                    st.session_state[f"confirm_del_out_{order['id']}"] = False
-                                    st.rerun()
-                                else:
-                                    st.error(msg)
-                            else:
-                                st.session_state[f"confirm_del_out_{order['id']}"] = True
-                                st.warning("⚠️ اضغط مرة أخرى لتأكيد الحذف (ستُعاد الكميات إلى المخزون).")
-                                st.rerun()
-        else:
+        if not orders:
             st.info("لا توجد أذون صرف في هذه الفترة")
+        else:
+            table_orders = []
+            for order in orders:
+                items_count = conn.execute("SELECT COUNT(*) FROM transactions WHERE order_id=? AND transaction_type='صادر'", (order['id'],)).fetchone()[0]
+                table_orders.append({
+                    'رقم الإذن': order['order_number'],
+                    'التاريخ': order['order_date'],
+                    'الفندق': order['hotel_name'],
+                    'مسؤول الاستلام': order['recipient_name'],
+                    'عدد الأصناف': items_count,
+                    'ملاحظات': order['notes'] or '-',
+                })
+
+            df_orders = pd.DataFrame(table_orders)
+
+            with st.expander("🎨 تنسيق الجدول", expanded=False):
+                font_scale_out = st.slider("حجم الخط (%)", 50, 200, 100, 10, key="out_log_font")
+                color_out = st.selectbox("لون الجدول", ["افتراضي", "أخضر", "أزرق", "رمادي", "برتقالي"], key="out_log_color")
+                color_map_out = {"افتراضي": "#f0f2f6", "أخضر": "#e6ffe6", "أزرق": "#e6f0ff", "رمادي": "#f5f5f5", "برتقالي": "#fff3e6"}
+                bg_out = color_map_out.get(color_out, "#f0f2f6")
+
+            st.dataframe(df_orders, use_container_width=True, hide_index=True)
+            st.markdown(apply_table_styling(font_scale_out, bg_out), unsafe_allow_html=True)
+            st.caption(f"📊 إجمالي الأذون: {len(orders)}")
+            export_buttons(df_orders, "سجل_أذون_الصرف", "تقرير أذون الصرف")
+
+            st.divider()
+            st.subheader("🔍 عرض تفاصيل إذن")
+
+            order_options = [f"{o['order_number']} - {o['hotel_name']} - {o['order_date']}" for o in orders]
+            selected_order_option = st.selectbox("اختر الإذن", order_options, key="out_detail_select")
+            selected_idx = order_options.index(selected_order_option)
+            order = orders[selected_idx]
+
+            st.divider()
+            col_det1, col_det2 = st.columns(2)
+            with col_det1:
+                st.write(f"**رقم الإذن:** {order['order_number']}")
+                st.write(f"**التاريخ:** {order['order_date']}")
+                st.write(f"**الفندق:** {order['hotel_name']}")
+                st.write(f"**مسؤول الاستلام:** {order['recipient_name']}")
+            with col_det2:
+                st.write(f"**ملاحظات:** {order['notes'] or 'لا يوجد'}")
+
+            items_in_order = conn.execute("""
+                SELECT i.name, t.qty, u.unit_symbol
+                FROM transactions t
+                JOIN items i ON t.item_id = i.id
+                LEFT JOIN units u ON t.unit_id = u.id
+                WHERE t.order_id = ? AND t.transaction_type = 'صادر'
+            """, (order['id'],)).fetchall()
+
+            if items_in_order:
+                st.markdown("### الأصناف المصروفة")
+                df_items = pd.DataFrame([list(r) for r in items_in_order], columns=['الصنف', 'الكمية', 'الوحدة'])
+                st.dataframe(df_items, use_container_width=True, hide_index=True)
+
+            st.divider()
+            col_btn_print, col_btn_delete = st.columns(2)
+
+            with col_btn_print:
+                if st.button(f"🖨️ طباعة PDF", key=f"print_out_{order['id']}", type="primary"):
+                    font_path = get_arabic_font()
+                    pdf = FPDF()
+                    pdf.add_page()
+                    if font_path:
+                        pdf.add_font("Amiri", fname=font_path)
+                        pdf.set_font("Amiri", size=16)
+                    else:
+                        pdf.set_font("Helvetica", size=16)
+                    pdf.cell(0, 10, shape_arabic("إذن صرف مخزني"), ln=True, align='C')
+                    pdf.ln(5)
+                    pdf.set_font("Amiri", size=12) if font_path else pdf.set_font("Helvetica", size=12)
+                    pdf.cell(0, 8, shape_arabic(f"رقم الإذن: {order['order_number']}"), ln=True, align='R')
+                    pdf.cell(0, 8, shape_arabic(f"التاريخ: {order['order_date']}"), ln=True, align='R')
+                    pdf.cell(0, 8, shape_arabic(f"الفندق: {order['hotel_name']}"), ln=True, align='R')
+                    pdf.cell(0, 8, shape_arabic(f"مسؤول الاستلام: {order['recipient_name']}"), ln=True, align='R')
+                    pdf.ln(5)
+                    pdf.set_fill_color(0, 168, 107)
+                    pdf.set_text_color(255, 255, 255)
+                    pdf.cell(30, 10, shape_arabic("الوحدة"), border=1, fill=True, align='C')
+                    pdf.cell(30, 10, shape_arabic("الكمية"), border=1, fill=True, align='C')
+                    pdf.cell(100, 10, shape_arabic("الصنف"), border=1, fill=True, align='C')
+                    pdf.ln()
+                    pdf.set_text_color(0, 0, 0)
+                    pdf.set_font("Amiri", size=10) if font_path else pdf.set_font("Helvetica", size=10)
+                    for item in items_in_order:
+                        pdf.cell(30, 8, shape_arabic(item['unit_symbol'] or ''), border=1, align='C')
+                        pdf.cell(30, 8, shape_arabic(str(item['qty'])), border=1, align='C')
+                        pdf.cell(100, 8, shape_arabic(item['name']), border=1, align='C')
+                        pdf.ln()
+                    pdf.ln(10)
+                    pdf.cell(0, 10, shape_arabic(f"توقيع مسؤول الاستلام ({order['recipient_name']}): ________________"), ln=True, align='R')
+                    pdf.cell(0, 10, shape_arabic("توقيع أمين المخزن: ________________"), ln=True, align='R')
+
+                    pdf_bytes = bytes(pdf.output())
+                    st.download_button(f"📥 تحميل PDF", data=pdf_bytes,
+                                       file_name=f"{order['order_number']}.pdf", mime="application/pdf")
+
+            with col_btn_delete:
+                if st.button(f"🗑️ حذف الإذن {order['order_number']}", key=f"del_out_{order['id']}"):
+                    if st.session_state.get(f"confirm_del_out_{order['id']}", False):
+                        success, msg = delete_outward_order(order['id'])
+                        if success:
+                            st.success(msg)
+                            _clear_all_caches()
+                            st.session_state[f"confirm_del_out_{order['id']}"] = False
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                    else:
+                        st.session_state[f"confirm_del_out_{order['id']}"] = True
+                        st.warning("⚠️ اضغط مرة أخرى لتأكيد الحذف (ستُعاد الكميات للمخزون)")
+                        st.rerun()
 
 elif choice == "📝 الجرد":
     st.header("الجرد الدوري")
     conn = get_db()
 
-    _cached_items_j = _cache_items_basic()
-    items_basic = [{'id': r[0], 'name': r[1], 'unit_id': r[2]} for r in _cached_items_j]
+    items_full = conn.execute("SELECT id, name, current_balance, unit_id FROM items WHERE is_active=1 ORDER BY name").fetchall()
 
-    if items_basic:
-        items_full = conn.execute("SELECT id, name, current_balance, unit_id FROM items WHERE is_active=1 ORDER BY name").fetchall()
+    if items_full:
         item_names = [i['name'] for i in items_full]
         item = st.selectbox("الصنف", item_names)
         it = [i for i in items_full if i['name'] == item][0]
