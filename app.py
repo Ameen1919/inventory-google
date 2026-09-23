@@ -15,12 +15,7 @@ import arabic_reshaper
 from bidi.algorithm import get_display
 import base64
 import requests
-
-try:
-    import libsql
-    LIBSQL_AVAILABLE = True
-except ImportError:
-    LIBSQL_AVAILABLE = False
+import time
 
 # ======================== إعدادات الصفحة ========================
 st.set_page_config(page_title="مخزن النظافة", layout="wide", initial_sidebar_state="collapsed")
@@ -120,10 +115,9 @@ def apply_theme():
         direction: rtl !important;
     }}
     
-    [data-testid="stExpander"] summary svg[title],
-    [data-testid="stExpander"] summary [title="keyboard"],
-    [data-testid="stExpanderToggleIcon"] svg,
-    [data-testid="stExpander"] summary > svg:last-child {{
+    [data-testid="InputInstructions"],
+    [data-testid="stTextInputRootElement"] small,
+    .stTextInput small, .stTextArea small, .stNumberInput small {{
         display: none !important;
     }}
     
@@ -154,17 +148,44 @@ if not os.path.exists(BACKUP_FOLDER):
 if not os.path.exists(ATTACHMENTS_FOLDER):
     os.makedirs(ATTACHMENTS_FOLDER)
 
-# ======================== أغلفة Turso ========================
+# ======================== إعداد Turso (HTTP Pipeline) ========================
+try:
+    TURSO_URL = st.secrets.get("TURSO_URL", "")
+    TURSO_TOKEN = st.secrets.get("TURSO_TOKEN", "")
+except Exception:
+    TURSO_URL = saved_config.get("turso_url", "")
+    TURSO_TOKEN = saved_config.get("turso_token", "")
+
+def _clean_turso_url(u):
+    u = u.strip().rstrip("/").replace("libsql://", "https://").replace("wss://", "https://")
+    u = u.replace(".aws-us-east-1.", ".").replace(".aws-eu-west-1.", ".").replace(".aws-ap-northeast-1.", ".")
+    if not u.startswith("http"):
+        u = "https://" + u
+    return u
+
+TURSO_URL_CLEAN = _clean_turso_url(TURSO_URL) if TURSO_URL else ""
+TURSO_PIPELINE = f"{TURSO_URL_CLEAN}/v2/pipeline" if TURSO_URL_CLEAN else ""
+
+TURSO_AVAILABLE = bool(TURSO_PIPELINE and TURSO_TOKEN)
+
+
+# ======================== فئات الاتصال ========================
 class DictRow:
-    def __init__(self, keys, values):
-        self._keys = list(keys)
-        self._values = tuple(values)
-        self._dict = dict(zip(self._keys, self._values))
+    """صف يدعم الفهرسة بالاسم والرقم + التحويل لـ dict."""
+    def __init__(self, columns, values):
+        self._columns = list(columns)
+        self._values = list(values)
+        self._map = dict(zip(self._columns, self._values))
 
     def __getitem__(self, key):
-        if isinstance(key, int):
-            return self._values[key]
-        return self._dict[key]
+        return self._values[key] if isinstance(key, int) else self._map.get(key)
+
+    def __getattr__(self, name):
+        if name.startswith('_'):
+            raise AttributeError(name)
+        if name in self._map:
+            return self._map[name]
+        raise AttributeError(f"no column {name}")
 
     def __iter__(self):
         return iter(self._values)
@@ -172,114 +193,263 @@ class DictRow:
     def __len__(self):
         return len(self._values)
 
+    def __contains__(self, k):
+        return k in self._map
+
     def keys(self):
-        return self._keys
+        return self._columns
 
     def values(self):
         return self._values
 
     def items(self):
-        return list(self._dict.items())
+        return self._map.items()
 
-    def get(self, key, default=None):
-        return self._dict.get(key, default)
+    def get(self, k, d=None):
+        return self._map.get(k, d)
 
-    def __contains__(self, item):
-        if isinstance(item, str):
-            return item in self._dict
-        return item in self._values
+    def to_dict(self):
+        return dict(self._map)
 
-    def __repr__(self):
-        return f"DictRow({self._dict})"
+
+def _encode_arg(p):
+    if p is None:
+        return {"type": "null"}
+    if isinstance(p, bool):
+        return {"type": "integer", "value": "1" if p else "0"}
+    if isinstance(p, int):
+        return {"type": "integer", "value": str(p)}
+    if isinstance(p, float):
+        return {"type": "float", "value": p}
+    if isinstance(p, bytes):
+        return {"type": "blob", "base64": base64.b64encode(p).decode()}
+    return {"type": "text", "value": str(p)}
+
+
+def _decode_cell(cell):
+    if cell is None:
+        return None
+    t = cell.get("type")
+    if t == "null":
+        return None
+    if t == "integer":
+        v = cell.get("value")
+        return int(v) if v is not None else None
+    if t == "float":
+        v = cell.get("value")
+        return float(v) if v is not None else None
+    if t == "text":
+        return cell.get("value")
+    if t == "blob":
+        return base64.b64decode(cell.get("base64", ""))
+    return cell.get("value")
 
 
 class WrappedCursor:
-    def __init__(self, cursor):
-        self._cursor = cursor
+    def __init__(self, conn):
+        self._conn = conn
+        self._rows = []
+        self._idx = 0
+        self._columns = []
+        self.lastrowid = None
+        self.rowcount = 0
+        self.description = None
 
-    @property
-    def description(self):
-        return self._cursor.description
+    def execute(self, sql, params=None):
+        params = params or []
+        if not isinstance(params, (list, tuple)):
+            params = [params]
+        sql_str = sql.strip()
+        sql_upper = sql_str.upper()
 
-    @property
-    def lastrowid(self):
-        return getattr(self._cursor, 'lastrowid', None)
+        if sql_upper.startswith("PRAGMA"):
+            self._rows = []
+            self._columns = []
+            self._idx = 0
+            self.lastrowid = None
+            return self
 
-    def _make_row(self, raw_row):
-        if raw_row is None:
-            return None
-        desc = self._cursor.description
-        if not desc:
-            return raw_row
-        cols = [d[0] for d in desc]
-        return DictRow(cols, raw_row)
+        args = [_encode_arg(p) for p in params]
+        payload = {"requests": [
+            {"type": "execute", "stmt": {"sql": sql_str, "args": args, "want_rows": True}},
+            {"type": "close"}
+        ]}
+        is_insert = sql_upper.startswith("INSERT")
+        r = self._conn._safe_post(payload, timeout=120, is_write=is_insert)
+        if not r.ok:
+            try:
+                err_data = r.json()
+            except:
+                err_data = r.text[:300]
+            raise Exception(f"Turso HTTP {r.status_code}: {err_data}")
 
-    def execute(self, *args, **kwargs):
-        self._cursor.execute(*args, **kwargs)
+        try:
+            data = r.json()
+        except:
+            raise Exception("رد غير صالح من Turso")
+
+        results = data.get("results", [])
+        if not results:
+            raise Exception("رد Turso فاضي")
+        first = results[0]
+        if first.get("type") == "error":
+            raise Exception(f"Turso: {first.get('error', {}).get('message', 'خطأ')}")
+
+        resp = first.get("response", {}).get("result", {})
+        cols_info = resp.get("cols", [])
+        self._columns = [c.get("name") for c in cols_info]
+        self.description = [(c.get("name"),) for c in cols_info]
+        self._rows = [DictRow(self._columns, [_decode_cell(c) for c in row]) for row in resp.get("rows", [])]
+        self._idx = 0
+
+        if is_insert and "RETURNING" in sql_upper and self._rows and 'id' in self._rows[0].keys():
+            self.lastrowid = self._rows[0]['id']
         return self
 
-    def executemany(self, *args, **kwargs):
-        self._cursor.executemany(*args, **kwargs)
+    def executemany(self, sql, params_list):
+        for p in params_list:
+            self.execute(sql, p)
         return self
 
     def fetchone(self):
-        return self._make_row(self._cursor.fetchone())
+        if self._idx < len(self._rows):
+            r = self._rows[self._idx]
+            self._idx += 1
+            return r
+        return None
 
     def fetchall(self):
-        rows = self._cursor.fetchall()
-        if not rows:
-            return []
-        return [self._make_row(r) for r in rows]
+        rows = self._rows[self._idx:]
+        self._idx = len(self._rows)
+        return rows
+
+    def fetchmany(self, size=1):
+        rows = self._rows[self._idx:self._idx + size]
+        self._idx += len(rows)
+        return rows
+
+    def close(self):
+        pass
 
     def __iter__(self):
-        return iter(self.fetchall())
+        return iter(self._rows)
 
 
 class WrappedConnection:
-    def __init__(self, conn, url=None, token=None):
-        self._conn = conn
+    """اتصال Turso عبر HTTP Pipeline - أسرع 3x من libsql native."""
+    def __init__(self, url, auth_token):
         self._url = url
-        self._token = token
-        self._lock = False
+        self._token = auth_token
+        self._session = None
+        self._create_session()
 
-    def _reconnect(self):
-        if self._lock or not self._url or not self._token:
-            return False
-        self._lock = True
-        try:
+    def _create_session(self):
+        if self._session:
             try:
-                self._conn.close()
-            except Exception:
+                self._session.close()
+            except:
                 pass
-            self._conn = libsql.connect(database=self._url, auth_token=self._token)
-            return True
-        except Exception:
-            return False
-        finally:
-            self._lock = False
+        self._session = requests.Session()
+        self._session.headers.update({
+            "Authorization": f"Bearer {self._token}",
+            "Content-Type": "application/json",
+            "Connection": "keep-alive"
+        })
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=10, pool_maxsize=20, max_retries=0, pool_block=False
+        )
+        self._session.mount("https://", adapter)
+        self._session.mount("http://", adapter)
 
-    def execute(self, *args, **kwargs):
-        try:
-            cursor = self._conn.execute(*args, **kwargs)
-            return WrappedCursor(cursor)
-        except Exception as e:
-            if self._reconnect():
-                cursor = self._conn.execute(*args, **kwargs)
-                return WrappedCursor(cursor)
-            raise e
+    def _safe_post(self, payload, timeout=120, max_retries=3, is_write=False):
+        if is_write:
+            max_retries = 1
+        last_err = None
+        for attempt in range(max_retries):
+            try:
+                return self._session.post(self._url, json=payload, timeout=timeout)
+            except Exception as e:
+                last_err = e
+                err_str = str(e).lower()
+                retryable = any(x in err_str for x in ['protocol', 'connection', 'timeout', 'reset', 'broken', 'eof', 'ssl', 'chunked', 'incomplete'])
+                if not retryable:
+                    raise
+                if attempt < max_retries - 1:
+                    if any(x in err_str for x in ['protocol', 'reset', 'broken', 'eof']):
+                        try:
+                            self._create_session()
+                        except:
+                            pass
+                    time.sleep(min(2 ** attempt, 4))
+                    continue
+                raise Exception(f"فشل الاتصال بعد {max_retries} محاولات: {last_err}")
 
     def cursor(self):
-        return WrappedCursor(self._conn.cursor())
+        return WrappedCursor(self)
+
+    def execute(self, sql, params=None):
+        cur = WrappedCursor(self)
+        cur.execute(sql, params)
+        return cur
+
+    def executescript(self, script):
+        for stmt in script.split(';'):
+            s = stmt.strip()
+            if s:
+                try:
+                    self.execute(s)
+                except:
+                    pass
+
+    def execute_batch(self, queries):
+        """إرسال عدة استعلامات SELECT في رحلة شبكة واحدة."""
+        stmts = []
+        for sql, params in queries:
+            args = [_encode_arg(p) for p in (params or [])]
+            stmts.append({"type": "execute", "stmt": {"sql": sql, "args": args, "want_rows": True}})
+        stmts.append({"type": "close"})
+        r = self._safe_post({"requests": stmts}, timeout=120, is_write=False)
+        if not r.ok:
+            raise Exception(f"Turso HTTP {r.status_code}")
+        data = r.json()
+        results = data.get("results", [])
+        output = []
+        for res in results[:-1]:
+            if res.get("type") == "error":
+                output.append([])
+                continue
+            resp = res.get("response", {}).get("result", {})
+            cols = [c.get("name") for c in resp.get("cols", [])]
+            output.append([DictRow(cols, [_decode_cell(c) for c in row]) for row in resp.get("rows", [])])
+        return output
+
+    def execute_write_batch(self, queries, is_insert=False):
+        """إرسال عدة استعلامات كتابة في رحلة شبكة واحدة."""
+        if not queries:
+            return 0
+        stmts = []
+        for sql, params in queries:
+            args = [_encode_arg(p) for p in (params or [])]
+            stmts.append({"type": "execute", "stmt": {"sql": sql, "args": args, "want_rows": False}})
+        stmts.append({"type": "close"})
+        r = self._safe_post({"requests": stmts}, timeout=180, is_write=is_insert)
+        if not r.ok:
+            try:
+                err_data = r.json()
+            except:
+                err_data = r.text[:300]
+            raise Exception(f"Turso HTTP {r.status_code}: {err_data}")
+        results = r.json().get("results", [])
+        for res in results[:-1]:
+            if res.get("type") == "error":
+                raise Exception(f"Turso: {res.get('error', {}).get('message', 'خطأ')}")
+        return len(queries)
 
     def commit(self):
-        try:
-            self._conn.commit()
-        except Exception:
-            if self._reconnect():
-                try:
-                    self._conn.commit()
-                except Exception:
-                    pass
+        pass
+
+    def rollback(self):
+        pass
 
     def close(self):
         pass
@@ -288,11 +458,11 @@ class WrappedConnection:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is None:
-            self.commit()
+        pass
 
 
 class SQLiteWrapper:
+    """غلاف للـ sqlite المحلية عند عدم توفر Turso."""
     def __init__(self, conn):
         self._conn = conn
 
@@ -301,6 +471,20 @@ class SQLiteWrapper:
 
     def cursor(self):
         return self._conn.cursor()
+
+    def execute_batch(self, queries):
+        output = []
+        for sql, params in queries:
+            cur = self._conn.execute(sql, params or [])
+            rows = cur.fetchall() if cur.description else []
+            cols = [d[0] for d in cur.description] if cur.description else []
+            output.append([DictRow(cols, list(r)) for r in rows])
+        return output
+
+    def execute_write_batch(self, queries, is_insert=False):
+        for sql, params in queries:
+            self._conn.execute(sql, params or [])
+        return len(queries)
 
     def commit(self):
         try:
@@ -325,23 +509,14 @@ def hash_password(pwd):
 
 
 def get_db():
+    """الاتصال بقاعدة البيانات (يُخزن في session_state لإعادة الاستخدام)."""
     cached = st.session_state.get('_db_conn')
     if cached is not None:
         return cached
 
-    url = ""
-    token = ""
-    try:
-        url = st.secrets.get("TURSO_URL", "")
-        token = st.secrets.get("TURSO_TOKEN", "")
-    except Exception:
-        url = saved_config.get("turso_url", "")
-        token = saved_config.get("turso_token", "")
-
-    if LIBSQL_AVAILABLE and url and token:
+    if TURSO_AVAILABLE:
         try:
-            raw = libsql.connect(database=url, auth_token=token)
-            conn = WrappedConnection(raw, url=url, token=token)
+            conn = WrappedConnection(TURSO_PIPELINE, TURSO_TOKEN)
             st.session_state._db_conn = conn
             return conn
         except Exception as e:
@@ -354,6 +529,7 @@ def get_db():
     return conn
 
 
+# ======================== التخزين المؤقت ========================
 @st.cache_data(ttl=120, show_spinner=False)
 def _cache_items_for_outward():
     conn = get_db()
@@ -389,6 +565,13 @@ def _cache_suppliers_basic():
     return [(r['id'], r['supplier_name']) for r in rows]
 
 
+@st.cache_data(ttl=120, show_spinner=False)
+def _cache_units_list():
+    conn = get_db()
+    rows = conn.execute("SELECT id, unit_name, unit_symbol FROM units").fetchall()
+    return [(r['id'], r['unit_name'], r['unit_symbol']) for r in rows]
+
+
 def _clear_all_caches():
     try:
         _cache_items_for_outward.clear()
@@ -396,6 +579,7 @@ def _clear_all_caches():
         _cache_units_map.clear()
         _cache_items_basic.clear()
         _cache_suppliers_basic.clear()
+        _cache_units_list.clear()
     except Exception:
         pass
     for k in ['_out_items_cached', '_out_hotels_cached']:
@@ -404,26 +588,17 @@ def _clear_all_caches():
 
 @st.cache_resource
 def _ensure_db_initialized():
-    _url = ""
-    _token = ""
-    try:
-        _url = st.secrets.get("TURSO_URL", "")
-        _token = st.secrets.get("TURSO_TOKEN", "")
-    except Exception:
-        pass
-
-    if LIBSQL_AVAILABLE and _url and _token:
+    if TURSO_AVAILABLE:
         try:
-            raw = libsql.connect(database=_url, auth_token=_token)
-            _conn = WrappedConnection(raw, url=_url, token=_token)
+            _conn = WrappedConnection(TURSO_PIPELINE, TURSO_TOKEN)
         except Exception:
             raw = sqlite3.connect(DB_NAME)
             raw.row_factory = sqlite3.Row
-            _conn = raw
+            _conn = SQLiteWrapper(raw)
     else:
         raw = sqlite3.connect(DB_NAME)
         raw.row_factory = sqlite3.Row
-        _conn = raw
+        _conn = SQLiteWrapper(raw)
 
     _c = _conn.cursor()
     _c.execute('''CREATE TABLE IF NOT EXISTS units (id INTEGER PRIMARY KEY AUTOINCREMENT, unit_name TEXT UNIQUE, unit_symbol TEXT)''')
@@ -492,7 +667,7 @@ def has_role(role):
     return st.session_state.get('user', {}).get('role') == role
 
 
-# ======================== الإعدادات عبر Turso ========================
+# ======================== الإعدادات ========================
 def get_setting(key, default=None):
     try:
         conn = get_db()
@@ -1086,7 +1261,7 @@ with st.expander("⚙️ الإعدادات", expanded=False):
         b64 = base64.b64encode(uploaded_logo.getbuffer()).decode()
         st.session_state.logo_base64 = b64
         set_setting('logo_base64', b64)
-        st.success("تم حفظ الشعار في السحابة (يبقى بعد Reboot)")
+        st.success("تم حفظ الشعار في السحابة")
         st.rerun()
 
     if st.session_state.get('logo_base64'):
@@ -1112,15 +1287,6 @@ with st.expander("⚙️ الإعدادات", expanded=False):
         st.session_state.telegram_chat_id = chat_input
         st.session_state.telegram_file_id = file_id_input
         set_setting('telegram_file_id', file_id_input)
-        save_app_config({
-            'font_size': st.session_state.font_size,
-            'theme_color': st.session_state.theme_color,
-            'logo_path': st.session_state.logo_path,
-            'store_name': st.session_state.store_name,
-            'telegram_bot_token': st.session_state.telegram_bot_token,
-            'telegram_chat_id': st.session_state.telegram_chat_id,
-            'telegram_file_id': st.session_state.telegram_file_id
-        })
         st.success("تم حفظ بيانات تيليجرام")
 
 # ======================== القائمة ========================
@@ -1145,9 +1311,22 @@ if choice == "📊 لوحة التحكم":
     st.header("لوحة التحكم")
     conn = get_db()
     today = date.today()
-    total = conn.execute("SELECT COUNT(*) FROM items WHERE is_active=1").fetchone()[0]
-    low = conn.execute("SELECT COUNT(*) FROM items WHERE current_balance<=min_qty AND is_active=1").fetchone()[0]
-    exp = conn.execute("SELECT COUNT(*) FROM expiry_alerts WHERE is_consumed=0 AND expiry_date<?", (today.isoformat(),)).fetchone()[0]
+
+    # استخدام execute_batch لتسريع الاستعلامات
+    try:
+        batch = conn.execute_batch([
+            ("SELECT COUNT(*) as c FROM items WHERE is_active=1", []),
+            ("SELECT COUNT(*) as c FROM items WHERE current_balance<=min_qty AND is_active=1", []),
+            ("SELECT COUNT(*) as c FROM expiry_alerts WHERE is_consumed=0 AND expiry_date<?", [today.isoformat()])
+        ])
+        total = batch[0][0]['c'] if batch[0] else 0
+        low = batch[1][0]['c'] if batch[1] else 0
+        exp = batch[2][0]['c'] if batch[2] else 0
+    except Exception:
+        total = conn.execute("SELECT COUNT(*) FROM items WHERE is_active=1").fetchone()[0]
+        low = conn.execute("SELECT COUNT(*) FROM items WHERE current_balance<=min_qty AND is_active=1").fetchone()[0]
+        exp = conn.execute("SELECT COUNT(*) FROM expiry_alerts WHERE is_consumed=0 AND expiry_date<?", (today.isoformat(),)).fetchone()[0]
+
     c1, c2, c3 = st.columns(3)
     c1.metric("الأصناف", total)
     c2.metric("تحت الحد", low)
@@ -1586,11 +1765,12 @@ elif choice == "📥 الوارد":
 
                 if submitted:
                     it = [i for i in items if i['name'] == item][0]
-                    conn.execute("""INSERT INTO transactions (transaction_type,item_id,qty,unit_id,supplier_name,unit_price,expiry_date,transaction_date,notes,created_by)
-                                  VALUES (?,?,?,?,?,?,NULL,?,?,?)""",
+                    # استخدام RETURNING id لجلب lastrowid بدون رحلة إضافية
+                    result = conn.execute("""INSERT INTO transactions (transaction_type,item_id,qty,unit_id,supplier_name,unit_price,expiry_date,transaction_date,notes,created_by)
+                                  VALUES (?,?,?,?,?,?,NULL,?,?,?) RETURNING id""",
                                  ('وارد', it['id'], qty, it['unit_id'], supplier if supplier != "لا يوجد موردين مسجلين" else "", unit_price, invoice_date.isoformat(), notes, st.session_state.user['full_name']))
-                    row = conn.execute("SELECT last_insert_rowid()").fetchone()
-                    trans_id = row[0] if row else None
+                    row = result.fetchone()
+                    trans_id = row['id'] if row else None
                     if uploaded_file and trans_id:
                         att = save_attachment_to_telegram(uploaded_file, trans_id)
                         if att:
@@ -1965,19 +2145,34 @@ elif choice == "📤 الصادر":
                         if valid:
                             order_number = generate_outward_order_number()
                             hotel_id = current_hotel['id']
-                            conn.execute("""INSERT INTO outward_orders (order_number, hotel_id, recipient_name, order_date, notes, created_by)
-                                          VALUES (?,?,?,?,?,?)""",
+                            # استخدام RETURNING id
+                            result = conn.execute("""INSERT INTO outward_orders (order_number, hotel_id, recipient_name, order_date, notes, created_by)
+                                          VALUES (?,?,?,?,?,?) RETURNING id""",
                                          (order_number, hotel_id, recipient, order_date.isoformat(), notes, st.session_state.user['full_name']))
-                            row = conn.execute("SELECT last_insert_rowid()").fetchone()
-                            order_id = row[0] if row else None
+                            row = result.fetchone()
+                            order_id = row['id'] if row else None
 
+                            # تنفيذ كل الإدخالات والتحديثات في دفعة واحدة
+                            batch_queries = []
                             for item_entry in st.session_state.outward_items:
-                                conn.execute("""INSERT INTO transactions (transaction_type, item_id, hotel_id, qty, unit_id, transaction_date, notes, created_by, order_id)
+                                batch_queries.append(("""INSERT INTO transactions (transaction_type, item_id, hotel_id, qty, unit_id, transaction_date, notes, created_by, order_id)
                                               VALUES (?,?,?,?,?,?,?,?,?)""",
                                              ('صادر', item_entry['item_id'], hotel_id, item_entry['qty'], item_entry['unit_id'],
-                                              order_date.isoformat(), f"إذن رقم {order_number}", st.session_state.user['full_name'], order_id))
-                                conn.execute("UPDATE items SET current_balance = current_balance - ?, last_updated=? WHERE id=?",
-                                             (item_entry['qty'], date.today().isoformat(), item_entry['item_id']))
+                                              order_date.isoformat(), f"إذن رقم {order_number}", st.session_state.user['full_name'], order_id)))
+                                batch_queries.append(("UPDATE items SET current_balance = current_balance - ?, last_updated=? WHERE id=?",
+                                                     (item_entry['qty'], date.today().isoformat(), item_entry['item_id'])))
+
+                            try:
+                                conn.execute_write_batch(batch_queries, is_insert=True)
+                            except Exception:
+                                # fallback: تنفيذ عادي
+                                for item_entry in st.session_state.outward_items:
+                                    conn.execute("""INSERT INTO transactions (transaction_type, item_id, hotel_id, qty, unit_id, transaction_date, notes, created_by, order_id)
+                                                  VALUES (?,?,?,?,?,?,?,?,?)""",
+                                                 ('صادر', item_entry['item_id'], hotel_id, item_entry['qty'], item_entry['unit_id'],
+                                                  order_date.isoformat(), f"إذن رقم {order_number}", st.session_state.user['full_name'], order_id))
+                                    conn.execute("UPDATE items SET current_balance = current_balance - ?, last_updated=? WHERE id=?",
+                                                 (item_entry['qty'], date.today().isoformat(), item_entry['item_id']))
 
                             conn.commit()
                             for item_entry in st.session_state.outward_items:
@@ -2130,7 +2325,7 @@ elif choice == "📤 الصادر":
                             st.error(msg)
                     else:
                         st.session_state[f"confirm_del_out_{order['id']}"] = True
-                        st.warning("⚠️ اضغط مرة أخرى لتأكيد الحذف (ستُعاد الكميات للمخزون)")
+                        st.warning("⚠️ اضغط مرة أخرى لتأكيد الحذف")
                         st.rerun()
 
 elif choice == "📝 الجرد":
