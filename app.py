@@ -64,98 +64,37 @@ def apply_theme():
     
     *{{font-family:'Tajawal',sans-serif !important}}
     
-    .stMarkdown, .stMarkdown p, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4,
-    [data-testid="stMarkdownContainer"],
-    [data-testid="stMarkdownContainer"] p,
-    [data-testid="stMarkdownContainer"] h1,
-    [data-testid="stMarkdownContainer"] h2,
-    [data-testid="stMarkdownContainer"] h3 {{
+    html, body, [class*="css"] {{
         direction: rtl !important;
         text-align: right !important;
     }}
-    
-    .stTextInput input, .stNumberInput input, .stTextArea textarea {{
+    .stApp {{
         direction: rtl !important;
-        text-align: right !important;
     }}
-    
-    .stSelectbox [data-baseweb="select"] > div,
-    .stMultiSelect [data-baseweb="select"] > div {{
-        direction: rtl !important;
-        text-align: right !important;
-    }}
-    
-    [data-testid="stMetric"] div {{
-        direction: rtl !important;
-        text-align: right !important;
-    }}
-    
-    .stAlert {{
-        direction: rtl !important;
-        text-align: right !important;
-    }}
-    
-    [data-testid="InputInstructions"],
-    [data-testid="stTextInputRootElement"] > div + div,
-    [data-testid="stTextInput"] small,
-    [data-testid="stNumberInput"] small,
-    [data-testid="stTextArea"] small,
-    .stTextInput small, .stTextArea small, .stNumberInput small,
-    input ~ small, input + small, textarea ~ small, textarea + small,
-    [class*="keyboard"], [class*="Keyboard"],
-    [class*="shortcut"], [class*="Shortcut"],
-    [aria-label*="keyboard"], [aria-label*="Keyboard"],
-    [title*="keyboard"], [title*="Keyboard"] {{
-        display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        height: 0 !important;
-        width: 0 !important;
-        pointer-events: none !important;
-    }}
-    
-    /* التبويبات - على اليمين */
     .stTabs [data-baseweb="tab-list"] {{
         direction: rtl !important;
-        flex-direction: row-reverse !important;
-        justify-content: flex-start !important;
-        gap: 12px !important;
-        flex-wrap: wrap !important;
     }}
     
-    .stTabs [data-baseweb="tab-highlight"],
-    .stTabs [data-baseweb="tab-border"] {{
+    .stButton, .stSelectbox, .stTextInput, .stNumberInput, .stDateInput, .stRadio, .stCheckbox {{
+        direction: rtl !important;
+        text-align: right !important;
+    }}
+    
+    h1, h2, h3, h4, h5, h6 {{
+        direction: rtl !important;
+        text-align: right !important;
+    }}
+    
+    input, textarea {{
+        direction: rtl !important;
+        text-align: right !important;
+    }}
+    
+    [data-testid="InputInstructions"] {{
         display: none !important;
     }}
     
-    .stTabs [data-baseweb="tab"] {{
-        direction: rtl !important;
-        white-space: nowrap !important;
-        padding: 8px 18px !important;
-        border-radius: 8px !important;
-        font-weight: 500 !important;
-        min-width: fit-content !important;
-        background-color: rgba(255, 255, 255, 0.6) !important;
-        border: 1px solid rgba(0, 0, 0, 0.1) !important;
-    }}
-    
-    .stTabs [data-baseweb="tab"]:hover {{
-        background-color: rgba(255, 255, 255, 0.9) !important;
-    }}
-    
-    .stTabs [aria-selected="true"] {{
-        background-color: {st.session_state.theme_color} !important;
-        color: white !important;
-    }}
-    
-    .stTabs [data-baseweb="tab"] p {{
-        white-space: nowrap !important;
-        margin: 0 !important;
-    }}
-    
-    [data-testid="stDataFrame"],
-    [data-testid="stTable"],
-    [data-testid="stDataFrameResizable"] {{
+    [data-testid="stDataFrame"] {{
         direction: rtl !important;
     }}
     
@@ -172,7 +111,6 @@ def apply_theme():
         }}
     }}
     </style>""", unsafe_allow_html=True)
-
 apply_theme()
 
 DB_NAME = 'cleaning_inventory.db'
