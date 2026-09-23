@@ -1931,7 +1931,7 @@ elif choice == "📥 الوارد":
                 color_map_in = {"افتراضي": "#f0f2f6", "أخضر": "#e6ffe6", "أزرق": "#e6f0ff", "رمادي": "#f5f5f5", "برتقالي": "#fff3e6"}
                 bg_in = color_map_in.get(color_in, "#f0f2f6")
 
-            st.dataframe(df_summary, use_container_width=True, hide_index=True)
+            st.dataframe(df_summary[df_summary.columns[::-1]], use_container_width=True, hide_index=True)
             st.markdown(apply_table_styling(font_scale_in, bg_in), unsafe_allow_html=True)
 
             col_sum1, col_sum2 = st.columns(2)
