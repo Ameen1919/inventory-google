@@ -72,7 +72,6 @@ if 'telegram_file_id' not in st.session_state:
     st.session_state.telegram_file_id = saved_config.get('telegram_file_id', "")
 if 'logo_base64' not in st.session_state:
     st.session_state.logo_base64 = ""
-
 def apply_theme():
     st.markdown(f"""
     <style>
@@ -80,6 +79,7 @@ def apply_theme():
     
     *{{font-family:'Tajawal',sans-serif !important}}
     
+    /* النصوص العربية */
     .stMarkdown, .stMarkdown p, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4,
     [data-testid="stMarkdownContainer"],
     [data-testid="stMarkdownContainer"] p,
@@ -90,11 +90,13 @@ def apply_theme():
         text-align: right !important;
     }}
     
+    /* حقول الإدخال */
     .stTextInput input, .stNumberInput input, .stTextArea textarea {{
         direction: rtl !important;
         text-align: right !important;
     }}
     
+    /* القوائم المنسدلة */
     .stSelectbox [data-baseweb="select"] > div,
     .stMultiSelect [data-baseweb="select"] > div {{
         direction: rtl !important;
@@ -111,21 +113,67 @@ def apply_theme():
         text-align: right !important;
     }}
     
+    /* ========== إخفاء "keyboard_ar" وكل اختصارات لوحة المفاتيح ========== */
+    [data-testid="InputInstructions"],
+    [data-testid="stTextInputRootElement"] > div + div,
+    [data-testid="stTextInput"] small,
+    [data-testid="stNumberInput"] small,
+    [data-testid="stTextArea"] small,
+    .stTextInput small,
+    .stTextArea small,
+    .stNumberInput small,
+    input ~ small,
+    input + small,
+    textarea ~ small,
+    textarea + small,
+    [class*="keyboard"],
+    [class*="Keyboard"],
+    [class*="shortcut"],
+    [class*="Shortcut"],
+    [aria-label*="keyboard"],
+    [aria-label*="Keyboard"],
+    [title*="keyboard"],
+    [title*="Keyboard"] {{
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        height: 0 !important;
+        width: 0 !important;
+        pointer-events: none !important;
+    }}
+    
+    /* ========== إصلاح التبويبات ========== */
+    .stTabs [data-baseweb="tab-list"] {{
+        direction: rtl !important;
+        gap: 12px !important;
+        flex-wrap: wrap !important;
+    }}
+    
     .stTabs [data-baseweb="tab"] {{
         direction: rtl !important;
+        white-space: nowrap !important;
+        padding: 8px 18px !important;
+        border-radius: 8px !important;
+        font-weight: 500 !important;
+        min-width: fit-content !important;
     }}
     
-    [data-testid="InputInstructions"],
-    [data-testid="stTextInputRootElement"] small,
-    .stTextInput small, .stTextArea small, .stNumberInput small {{
-        display: none !important;
+    .stTabs [data-baseweb="tab"] > div {{
+        white-space: nowrap !important;
     }}
     
+    .stTabs [data-baseweb="tab"] p {{
+        white-space: nowrap !important;
+        margin: 0 !important;
+    }}
+    
+    /* خلفية التطبيق */
     .stApp {{
         background-color: {st.session_state.theme_color} !important;
         background-image: linear-gradient(135deg, {st.session_state.theme_color} 0%, #ffffff 100%) !important;
     }}
     
+    /* إخفاء الشريط الجانبي على الموبايل */
     @media (max-width: 768px) {{
         [data-testid="stSidebar"],
         [data-testid="stSidebarCollapsedControl"],
@@ -134,6 +182,7 @@ def apply_theme():
         }}
     }}
     </style>""", unsafe_allow_html=True)
+
 
 apply_theme()
 
