@@ -17,20 +17,15 @@ import base64
 import requests
 import time
 
-# ======================== إعدادات الصفحة ========================
 st.set_page_config(page_title="مخزن النظافة", layout="wide", initial_sidebar_state="collapsed")
 
 APP_CONFIG_FILE = 'app_config.json'
 
 def load_app_config():
     config = {
-        'font_size': 100,
-        'theme_color': "#00a86b",
-        'logo_path': None,
-        'store_name': "مخزن النظافة",
-        'telegram_bot_token': "",
-        'telegram_chat_id': "",
-        'telegram_file_id': ""
+        'font_size': 100, 'theme_color': "#00a86b", 'logo_path': None,
+        'store_name': "مخزن النظافة", 'telegram_bot_token': "",
+        'telegram_chat_id': "", 'telegram_file_id': ""
     }
     if os.path.exists(APP_CONFIG_FILE):
         try:
@@ -56,22 +51,12 @@ def save_app_config(config):
 
 saved_config = load_app_config()
 
-if 'font_size' not in st.session_state:
-    st.session_state.font_size = saved_config.get('font_size', 100)
-if 'theme_color' not in st.session_state:
-    st.session_state.theme_color = saved_config.get('theme_color', "#00a86b")
-if 'logo_path' not in st.session_state:
-    st.session_state.logo_path = saved_config.get('logo_path', None)
-if 'store_name' not in st.session_state:
-    st.session_state.store_name = saved_config.get('store_name', "مخزن النظافة")
-if 'telegram_bot_token' not in st.session_state:
-    st.session_state.telegram_bot_token = saved_config.get('telegram_bot_token', "")
-if 'telegram_chat_id' not in st.session_state:
-    st.session_state.telegram_chat_id = saved_config.get('telegram_chat_id', "")
-if 'telegram_file_id' not in st.session_state:
-    st.session_state.telegram_file_id = saved_config.get('telegram_file_id', "")
-if 'logo_base64' not in st.session_state:
-    st.session_state.logo_base64 = ""
+for _k, _v in [('font_size', 100), ('theme_color', "#00a86b"), ('logo_path', None),
+               ('store_name', "مخزن النظافة"), ('telegram_bot_token', ""),
+               ('telegram_chat_id', ""), ('telegram_file_id', ""), ('logo_base64', "")]:
+    if _k not in st.session_state:
+        st.session_state[_k] = saved_config.get(_k, _v) if _v is None or isinstance(_v, str) or isinstance(_v, int) else _v
+
 def apply_theme():
     st.markdown(f"""
     <style>
@@ -79,7 +64,6 @@ def apply_theme():
     
     *{{font-family:'Tajawal',sans-serif !important}}
     
-    /* النصوص العربية */
     .stMarkdown, .stMarkdown p, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4,
     [data-testid="stMarkdownContainer"],
     [data-testid="stMarkdownContainer"] p,
@@ -90,13 +74,11 @@ def apply_theme():
         text-align: right !important;
     }}
     
-    /* حقول الإدخال */
     .stTextInput input, .stNumberInput input, .stTextArea textarea {{
         direction: rtl !important;
         text-align: right !important;
     }}
     
-    /* القوائم المنسدلة */
     .stSelectbox [data-baseweb="select"] > div,
     .stMultiSelect [data-baseweb="select"] > div {{
         direction: rtl !important;
@@ -113,7 +95,6 @@ def apply_theme():
         text-align: right !important;
     }}
     
-    /* إخفاء keyboard_ar واختصارات لوحة المفاتيح */
     [data-testid="InputInstructions"],
     [data-testid="stTextInputRootElement"] > div + div,
     [data-testid="stTextInput"] small,
@@ -133,18 +114,16 @@ def apply_theme():
         pointer-events: none !important;
     }}
     
-    /* ========== التبويبات على اليمين ========== */
+    /* التبويبات - على اليمين */
     .stTabs [data-baseweb="tab-list"] {{
         direction: rtl !important;
+        flex-direction: row-reverse !important;
         justify-content: flex-start !important;
         gap: 12px !important;
         flex-wrap: wrap !important;
     }}
     
-    .stTabs [data-baseweb="tab-highlight"] {{
-        display: none !important;
-    }}
-    
+    .stTabs [data-baseweb="tab-highlight"],
     .stTabs [data-baseweb="tab-border"] {{
         display: none !important;
     }}
@@ -156,12 +135,12 @@ def apply_theme():
         border-radius: 8px !important;
         font-weight: 500 !important;
         min-width: fit-content !important;
-        background-color: rgba(255, 255, 255, 0.5) !important;
+        background-color: rgba(255, 255, 255, 0.6) !important;
         border: 1px solid rgba(0, 0, 0, 0.1) !important;
     }}
     
     .stTabs [data-baseweb="tab"]:hover {{
-        background-color: rgba(255, 255, 255, 0.8) !important;
+        background-color: rgba(255, 255, 255, 0.9) !important;
     }}
     
     .stTabs [aria-selected="true"] {{
@@ -169,47 +148,22 @@ def apply_theme():
         color: white !important;
     }}
     
-    .stTabs [data-baseweb="tab"] > div {{
-        white-space: nowrap !important;
-    }}
-    
     .stTabs [data-baseweb="tab"] p {{
         white-space: nowrap !important;
         margin: 0 !important;
     }}
     
-    /* ========== الجداول من اليمين ========== */
     [data-testid="stDataFrame"],
     [data-testid="stTable"],
     [data-testid="stDataFrameResizable"] {{
         direction: rtl !important;
     }}
     
-    [data-testid="stDataFrame"] div[role="columnheader"],
-    [data-testid="stTable"] thead th {{
-        direction: rtl !important;
-        text-align: right !important;
-    }}
-    
-    [data-testid="stDataFrame"] div[role="gridcell"],
-    [data-testid="stTable"] tbody td {{
-        direction: rtl !important;
-        text-align: right !important;
-    }}
-    
-    /* عكس ترتيب الأعمدة في الجدول */
-    [data-testid="stDataFrame"] div[role="row"],
-    [data-testid="stTable"] tr {{
-        direction: rtl !important;
-    }}
-    
-    /* خلفية التطبيق */
     .stApp {{
         background-color: {st.session_state.theme_color} !important;
         background-image: linear-gradient(135deg, {st.session_state.theme_color} 0%, #ffffff 100%) !important;
     }}
     
-    /* إخفاء الشريط الجانبي على الموبايل */
     @media (max-width: 768px) {{
         [data-testid="stSidebar"],
         [data-testid="stSidebarCollapsedControl"],
@@ -232,7 +186,6 @@ if not os.path.exists(BACKUP_FOLDER):
 if not os.path.exists(ATTACHMENTS_FOLDER):
     os.makedirs(ATTACHMENTS_FOLDER)
 
-# ======================== إعداد Turso (HTTP Pipeline) ========================
 try:
     TURSO_URL = st.secrets.get("TURSO_URL", "")
     TURSO_TOKEN = st.secrets.get("TURSO_TOKEN", "")
@@ -249,13 +202,10 @@ def _clean_turso_url(u):
 
 TURSO_URL_CLEAN = _clean_turso_url(TURSO_URL) if TURSO_URL else ""
 TURSO_PIPELINE = f"{TURSO_URL_CLEAN}/v2/pipeline" if TURSO_URL_CLEAN else ""
-
 TURSO_AVAILABLE = bool(TURSO_PIPELINE and TURSO_TOKEN)
 
 
-# ======================== فئات الاتصال ========================
 class DictRow:
-    """صف يدعم الفهرسة بالاسم والرقم + التحويل لـ dict."""
     def __init__(self, columns, values):
         self._columns = list(columns)
         self._values = list(values)
@@ -420,7 +370,6 @@ class WrappedCursor:
 
 
 class WrappedConnection:
-    """اتصال Turso عبر HTTP Pipeline - أسرع 3x من libsql native."""
     def __init__(self, url, auth_token):
         self._url = url
         self._token = auth_token
@@ -486,7 +435,6 @@ class WrappedConnection:
                     pass
 
     def execute_batch(self, queries):
-        """إرسال عدة استعلامات SELECT في رحلة شبكة واحدة."""
         stmts = []
         for sql, params in queries:
             args = [_encode_arg(p) for p in (params or [])]
@@ -508,7 +456,6 @@ class WrappedConnection:
         return output
 
     def execute_write_batch(self, queries, is_insert=False):
-        """إرسال عدة استعلامات كتابة في رحلة شبكة واحدة."""
         if not queries:
             return 0
         stmts = []
@@ -546,7 +493,6 @@ class WrappedConnection:
 
 
 class SQLiteWrapper:
-    """غلاف للـ sqlite المحلية عند عدم توفر Turso."""
     def __init__(self, conn):
         self._conn = conn
 
@@ -587,13 +533,11 @@ class SQLiteWrapper:
             self.commit()
 
 
-# ======================== دوال مساعدة ========================
 def hash_password(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
 
 
 def get_db():
-    """الاتصال بقاعدة البيانات (يُخزن في session_state لإعادة الاستخدام)."""
     cached = st.session_state.get('_db_conn')
     if cached is not None:
         return cached
@@ -613,7 +557,6 @@ def get_db():
     return conn
 
 
-# ======================== التخزين المؤقت ========================
 @st.cache_data(ttl=120, show_spinner=False)
 def _cache_items_for_outward():
     conn = get_db()
@@ -649,13 +592,6 @@ def _cache_suppliers_basic():
     return [(r['id'], r['supplier_name']) for r in rows]
 
 
-@st.cache_data(ttl=120, show_spinner=False)
-def _cache_units_list():
-    conn = get_db()
-    rows = conn.execute("SELECT id, unit_name, unit_symbol FROM units").fetchall()
-    return [(r['id'], r['unit_name'], r['unit_symbol']) for r in rows]
-
-
 def _clear_all_caches():
     try:
         _cache_items_for_outward.clear()
@@ -663,7 +599,6 @@ def _clear_all_caches():
         _cache_units_map.clear()
         _cache_items_basic.clear()
         _cache_suppliers_basic.clear()
-        _cache_units_list.clear()
     except Exception:
         pass
     for k in ['_out_items_cached', '_out_hotels_cached']:
@@ -701,14 +636,13 @@ def _ensure_db_initialized():
     _c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
     for u_name, u_sym in [('قطعة','قطعة'),('لتر','لتر'),('كيلو','كجم'),('متر','متر'),('كرتونة','كرتونة'),('رول','رول'),('زجاجة','زجاجة'),('علبة','علبة'),('كيس','كيس')]:
         _c.execute("INSERT OR IGNORE INTO units (unit_name, unit_symbol) VALUES (?,?)", (u_name, u_sym))
-    default_users = [
+    for uname, pwd, role, fname in [
         ('admin', hash_password('admin123'), 'super_admin', 'المدير العام'),
         ('مشتريات', hash_password('buy123'), 'purchasing', 'مسؤول المشتريات'),
         ('صرف', hash_password('out123'), 'disbursement', 'مسؤول الصرف'),
         ('مشرف1', hash_password('sup123'), 'supervisor', 'مشرف أول'),
         ('مشرف2', hash_password('sup456'), 'supervisor', 'مشرف ثاني')
-    ]
-    for uname, pwd, role, fname in default_users:
+    ]:
         _c.execute("INSERT OR IGNORE INTO users (username,password,role,full_name) VALUES (?,?,?,?)", (uname, pwd, role, fname))
     _conn.commit()
     return True
@@ -751,7 +685,6 @@ def has_role(role):
     return st.session_state.get('user', {}).get('role') == role
 
 
-# ======================== الإعدادات ========================
 def get_setting(key, default=None):
     try:
         conn = get_db()
@@ -800,7 +733,6 @@ def _load_settings_from_db():
     st.session_state._settings_loaded = True
 
 
-# ======================== تنبيهات المخزون ========================
 def send_stock_alert(item_name, current_balance, min_qty, unit_symbol):
     token = st.session_state.get('telegram_bot_token', '')
     chat_id = st.session_state.get('telegram_chat_id', '')
@@ -838,7 +770,6 @@ def check_and_alert_item(item_id):
         pass
 
 
-# ======================== PDF عربي ========================
 def get_arabic_font():
     path = "Amiri-Regular.ttf"
     if not os.path.exists(path):
@@ -926,7 +857,6 @@ def generate_outward_order_number():
     return f"OUT-{today_str}-{last_num:04d}"
 
 
-# ======================== المرفقات عبر تيليجرام ========================
 def save_attachment_to_telegram(uploaded_file, transaction_id):
     token = st.session_state.telegram_bot_token
     chat_id = st.session_state.telegram_chat_id
@@ -999,7 +929,6 @@ def display_attachment(file_id, caption="المرفق"):
         st.markdown(f"[📎 تحميل {caption}]({file_url})", unsafe_allow_html=True)
 
 
-# ======================== مرفقات الموردين ========================
 def get_supplier_attachments(supplier_id):
     conn = get_db()
     row = conn.execute("SELECT attachments FROM suppliers WHERE id=?", (supplier_id,)).fetchone()
@@ -1028,7 +957,6 @@ def delete_supplier_attachment(supplier_id, index):
         conn.commit()
 
 
-# ======================== النسخ الاحتياطي ========================
 def load_backup_config():
     if os.path.exists(CONFIG_FILE):
         try:
@@ -1218,7 +1146,6 @@ def recalculate_all_balances():
     conn.commit()
 
 
-# ======================== تيليجرام ========================
 def telegram_send_document(file_path, caption=""):
     token = st.session_state.telegram_bot_token
     chat_id = st.session_state.telegram_chat_id
@@ -1278,7 +1205,6 @@ def telegram_get_latest_db():
         return False, str(e)
 
 
-# ======================== دوال مساعدة للجداول ========================
 def apply_table_styling(font_scale, bg_color):
     return f"""<style>
         div[data-testid="stDataFrame"] div[data-testid="stTable"] {{ font-size: {font_scale}% !important; }}
@@ -1296,7 +1222,15 @@ def column_selector(label, all_columns, default_order, key):
     return st.session_state[key]
 
 
-# ======================== بدء التشغيل ========================
+def show_rtl_table(df, **kwargs):
+    """عرض جدول بأعمدة معكوسة (RTL)"""
+    if df is None or df.empty:
+        return
+    df_rev = df[df.columns[::-1]]
+    st.dataframe(df_rev, **kwargs)
+    return df_rev
+
+
 init_db()
 _load_settings_from_db()
 
@@ -1317,7 +1251,6 @@ if not st.session_state.logged_in:
                 st.error("خطأ")
     st.stop()
 
-# ======================== الواجهة الرئيسية ========================
 st.title(f"🧹 {st.session_state.store_name}")
 logo_b64 = st.session_state.get('logo_base64', '')
 if logo_b64:
@@ -1345,7 +1278,7 @@ with st.expander("⚙️ الإعدادات", expanded=False):
         b64 = base64.b64encode(uploaded_logo.getbuffer()).decode()
         st.session_state.logo_base64 = b64
         set_setting('logo_base64', b64)
-        st.success("تم حفظ الشعار في السحابة")
+        st.success("تم حفظ الشعار")
         st.rerun()
 
     if st.session_state.get('logo_base64'):
@@ -1373,7 +1306,6 @@ with st.expander("⚙️ الإعدادات", expanded=False):
         set_setting('telegram_file_id', file_id_input)
         st.success("تم حفظ بيانات تيليجرام")
 
-# ======================== القائمة ========================
 menu = []
 if check_perm():
     menu = ["📊 لوحة التحكم", "📦 إدارة الأصناف", "📏 الوحدات", "🏨 الفنادق", "🏢 الموردين",
@@ -1390,13 +1322,10 @@ elif has_role('auditor'):
 
 choice = st.selectbox("القائمة", menu, index=0)
 
-# ======================== الصفحات ========================
 if choice == "📊 لوحة التحكم":
     st.header("لوحة التحكم")
     conn = get_db()
     today = date.today()
-
-    # استخدام execute_batch لتسريع الاستعلامات
     try:
         batch = conn.execute_batch([
             ("SELECT COUNT(*) as c FROM items WHERE is_active=1", []),
@@ -1426,7 +1355,7 @@ if choice == "📊 لوحة التحكم":
             bg = color_map.get(color_option, "#f0f2f6")
             cols = column_selector("اختر الأعمدة ورتبها", list(df.columns), list(df.columns), "dash_cols")
         df_disp = df[cols]
-        st.dataframe(df_disp, use_container_width=True)
+        show_rtl_table(df_disp, use_container_width=True)
         st.markdown(apply_table_styling(font_scale, bg), unsafe_allow_html=True)
         export_buttons(df_disp, "اصناف_منخفضة", "تقرير الأصناف أقل من الحد الأدنى")
 
@@ -1456,9 +1385,7 @@ elif choice == "📦 إدارة الأصناف":
                 new_max = st.number_input("الحد الأقصى", min_value=0.0, value=100.0, step=0.1, key="new_item_max")
                 new_balance = st.number_input("الرصيد الافتتاحي", min_value=0.0, value=0.0, step=0.1, key="new_item_balance")
                 new_notes = st.text_input("ملاحظات", key="new_item_notes")
-
             submitted = st.form_submit_button("💾 حفظ الصنف", type="primary")
-
             if submitted:
                 if not new_name or not new_name.strip():
                     st.error("اسم الصنف مطلوب")
@@ -1478,7 +1405,6 @@ elif choice == "📦 إدارة الأصناف":
 
     with tab_edit:
         st.subheader("تعديل صنف موجود")
-
         all_items = conn.execute("SELECT id, item_code, name, unit_id, min_qty, max_qty, current_balance, notes FROM items WHERE is_active=1 ORDER BY name").fetchall()
         if not all_items:
             st.info("لا توجد أصناف مسجلة")
@@ -1486,7 +1412,6 @@ elif choice == "📦 إدارة الأصناف":
             item_names = [it['name'] for it in all_items]
             selected_name = st.selectbox("اختر الصنف للتعديل", item_names, key="edit_item_select")
             selected = next((it for it in all_items if it['name'] == selected_name), None)
-
             if selected:
                 st.divider()
                 with st.form("edit_item_form"):
@@ -1501,9 +1426,7 @@ elif choice == "📦 إدارة الأصناف":
                         edit_notes = st.text_input("ملاحظات", value=selected['notes'] or "", key="edit_item_notes")
                         st.info(f"الكود: {selected['item_code']}")
                         st.info(f"الرصيد الحالي: {selected['current_balance']}")
-
                     submitted = st.form_submit_button("💾 حفظ التعديلات", type="primary")
-
                     if submitted:
                         if not edit_name or not edit_name.strip():
                             st.error("اسم الصنف مطلوب")
@@ -1517,16 +1440,13 @@ elif choice == "📦 إدارة الأصناف":
                                              (edit_name.strip(), unit_id, edit_min, edit_max, edit_notes, date.today().isoformat(), selected['id']))
                                 conn.commit()
                                 _clear_all_caches()
-                                st.success(f"✅ تم حفظ التعديلات على '{edit_name}'")
+                                st.success(f"✅ تم حفظ التعديلات")
                                 st.rerun()
 
     with tab_view:
         st.subheader("قائمة الأصناف")
-
         search = st.text_input("🔍 بحث بالاسم أو الكود", key="item_search")
-
         all_items = conn.execute("SELECT i.id, i.item_code, i.name, i.current_balance, i.min_qty, i.max_qty, i.is_active, i.notes, u.unit_symbol FROM items i LEFT JOIN units u ON i.unit_id=u.id ORDER BY i.name").fetchall()
-
         if all_items:
             data = []
             for it in all_items:
@@ -1534,19 +1454,13 @@ elif choice == "📦 إدارة الأصناف":
                     if search.lower() not in (it['name'] or '').lower() and search.lower() not in (it['item_code'] or '').lower():
                         continue
                 data.append({
-                    "كود": it['item_code'],
-                    "الصنف": it['name'],
-                    "الرصيد": it['current_balance'],
-                    "الوحدة": it['unit_symbol'],
-                    "الحد الأدنى": it['min_qty'],
-                    "الحد الأقصى": it['max_qty'],
-                    "الحالة": "نشط" if it['is_active'] else "غير نشط",
-                    "ملاحظات": it['notes'] or ''
+                    "كود": it['item_code'], "الصنف": it['name'], "الرصيد": it['current_balance'],
+                    "الوحدة": it['unit_symbol'], "الحد الأدنى": it['min_qty'], "الحد الأقصى": it['max_qty'],
+                    "الحالة": "نشط" if it['is_active'] else "غير نشط", "ملاحظات": it['notes'] or ''
                 })
-
             if data:
                 df = pd.DataFrame(data)
-                st.dataframe(df, use_container_width=True, hide_index=True)
+                show_rtl_table(df, use_container_width=True, hide_index=True)
                 st.caption(f"إجمالي: {len(data)} صنف")
                 export_buttons(df, "الأصناف", "تقرير الأصناف")
             else:
@@ -1557,16 +1471,13 @@ elif choice == "📦 إدارة الأصناف":
     with tab_delete:
         st.subheader("حذف أو تعطيل صنف")
         st.caption("ملاحظة: الصنف اللي فيه حركات سابقة لا يمكن حذفه، لكن يمكن تعطيله فقط.")
-
         all_items = conn.execute("SELECT id, item_code, name, is_active, current_balance FROM items ORDER BY name").fetchall()
-
         if not all_items:
             st.info("لا توجد أصناف")
         else:
             item_names = [f"{it['name']} (كود: {it['item_code']})" for it in all_items]
             selected_name = st.selectbox("اختر الصنف", item_names, key="delete_item_select")
             selected = next((it for it in all_items if f"{it['name']} (كود: {it['item_code']})" == selected_name), None)
-
             if selected:
                 st.divider()
                 col1, col2 = st.columns(2)
@@ -1576,13 +1487,10 @@ elif choice == "📦 إدارة الأصناف":
                 with col2:
                     st.write(f"**الرصيد الحالي:** {selected['current_balance']}")
                     st.write(f"**الحالة:** {'نشط' if selected['is_active'] else 'معطل'}")
-
                 trans_count = conn.execute("SELECT COUNT(*) FROM transactions WHERE item_id=?", (selected['id'],)).fetchone()[0]
                 st.info(f"عدد الحركات المرتبطة بالصنف: **{trans_count}**")
-
                 st.divider()
                 col_btn1, col_btn2, col_btn3 = st.columns(3)
-
                 with col_btn1:
                     if trans_count == 0:
                         if st.button("🗑️ حذف الصنف نهائياً", key=f"del_item_{selected['id']}", type="primary"):
@@ -1592,7 +1500,7 @@ elif choice == "📦 إدارة الأصناف":
                                 conn.execute("DELETE FROM items WHERE id=?", (selected['id'],))
                                 conn.commit()
                                 _clear_all_caches()
-                                st.success(f"✅ تم حذف الصنف '{selected['name']}' نهائياً")
+                                st.success(f"✅ تم حذف الصنف")
                                 st.session_state[f"confirm_del_{selected['id']}"] = False
                                 st.rerun()
                             else:
@@ -1602,7 +1510,6 @@ elif choice == "📦 إدارة الأصناف":
                     else:
                         st.button("🗑️ حذف الصنف نهائياً", disabled=True, key=f"del_item_disabled_{selected['id']}")
                         st.caption("لا يمكن الحذف لوجود حركات مرتبطة")
-
                 with col_btn2:
                     if selected['is_active']:
                         if st.button("⏸️ تعطيل الصنف", key=f"disable_item_{selected['id']}"):
@@ -1618,7 +1525,6 @@ elif choice == "📦 إدارة الأصناف":
                             _clear_all_caches()
                             st.success(f"تم تنشيط '{selected['name']}'")
                             st.rerun()
-
                 with col_btn3:
                     if st.button("🔄 إعادة تحميل", key=f"reload_item_{selected['id']}"):
                         st.rerun()
@@ -1645,7 +1551,7 @@ elif choice == "📏 الوحدات":
         units = conn.execute("SELECT id, unit_name, unit_symbol FROM units").fetchall()
         if units:
             df_units = pd.DataFrame([list(u) for u in units], columns=['م', 'الوحدة', 'الرمز'])
-            edited_units = st.data_editor(df_units, num_rows="dynamic", key="units_editor", use_container_width=True)
+            edited_units = st.data_editor(df_units[df_units.columns[::-1]], num_rows="dynamic", key="units_editor", use_container_width=True)
             if st.button("💾 حفظ تعديلات الوحدات", key="save_units"):
                 with conn:
                     for _, row in edited_units.iterrows():
@@ -1759,7 +1665,6 @@ elif choice == "🏢 الموردين":
     with tab3:
         st.subheader("📎 مرفقات الموردين")
         st.caption("يمكنك رفع بيانات المورد، رقم الحساب، صور بطاقات، أي مستندات.")
-
         supps_for_att = conn.execute("SELECT id, supplier_name, attachments FROM suppliers ORDER BY supplier_name").fetchall()
         if not supps_for_att:
             st.info("لا يوجد موردين بعد. أضف مورداً أولاً.")
@@ -1768,7 +1673,6 @@ elif choice == "🏢 الموردين":
             selected_sup_name = st.selectbox("اختر المورد", supplier_names_att, key="sup_att_select")
             selected_sup = next(s for s in supps_for_att if s['supplier_name'] == selected_sup_name)
             sup_id = selected_sup['id']
-
             st.markdown("### المرفقات الحالية")
             atts = get_supplier_attachments(sup_id)
             if atts:
@@ -1783,13 +1687,12 @@ elif choice == "🏢 الموردين":
                             st.rerun()
             else:
                 st.info("لا توجد مرفقات لهذا المورد بعد.")
-
             st.divider()
             st.markdown("### ➕ إضافة مرفق جديد")
             up_sup = st.file_uploader("اختر ملف", type=["png", "jpg", "jpeg", "pdf", "doc", "docx", "xlsx"], key=f"sup_up_{sup_id}")
             if up_sup is not None:
                 if st.button("💾 حفظ المرفق", key=f"save_sup_att_{sup_id}", type="primary"):
-                    with st.spinner("جاري رفع المرفق إلى تيليجرام..."):
+                    with st.spinner("جاري رفع المرفق..."):
                         fid = save_attachment_to_telegram(up_sup, f"supplier_{sup_id}")
                     if fid:
                         add_supplier_attachment(sup_id, fid, up_sup.name)
@@ -1806,28 +1709,21 @@ elif choice == "📥 الوارد":
     with tab_in1:
         st.subheader("تسجيل مشتريات جديدة")
         conn = get_db()
-
         _cached_items_in = _cache_items_basic()
         _cached_suppliers_in = _cache_suppliers_basic()
-
         items = [{'id': r[0], 'name': r[1], 'unit_id': r[2]} for r in _cached_items_in]
         supplier_options = [r[1] for r in _cached_suppliers_in]
         if not supplier_options:
             supplier_options = ["لا يوجد موردين مسجلين"]
-
         if items:
             if 'inward_defaults' not in st.session_state:
                 st.session_state.inward_defaults = {
-                    'item': items[0]['name'] if items else "",
-                    'qty': 1.0,
+                    'item': items[0]['name'] if items else "", 'qty': 1.0,
                     'supplier': supplier_options[0] if supplier_options else "",
-                    'unit_price': 0.0,
-                    'invoice_date': date.today(),
-                    'notes': "",
+                    'unit_price': 0.0, 'invoice_date': date.today(), 'notes': "",
                 }
             if 'inward_form_values' not in st.session_state:
                 st.session_state.inward_form_values = st.session_state.inward_defaults.copy()
-
             with st.form("inward"):
                 item = st.selectbox("الصنف", [i['name'] for i in items],
                                     index=[i['name'] for i in items].index(st.session_state.inward_form_values['item']) if st.session_state.inward_form_values['item'] in [i['name'] for i in items] else 0)
@@ -1838,7 +1734,6 @@ elif choice == "📥 الوارد":
                 invoice_date = st.date_input("تاريخ الفاتورة", value=st.session_state.inward_form_values['invoice_date'])
                 notes = st.text_input("ملاحظات", value=st.session_state.inward_form_values['notes'])
                 uploaded_file = st.file_uploader("📎 إرفاق ملف (صورة أو PDF)", type=["png", "jpg", "jpeg", "pdf"])
-
                 col_submit, col_undo, col_redo = st.columns([2, 1, 1])
                 with col_submit:
                     submitted = st.form_submit_button("تسجيل")
@@ -1846,10 +1741,8 @@ elif choice == "📥 الوارد":
                     undo = st.form_submit_button("↩️ تراجع")
                 with col_redo:
                     redo = st.form_submit_button("↪️ تقديم")
-
                 if submitted:
                     it = [i for i in items if i['name'] == item][0]
-                    # استخدام RETURNING id لجلب lastrowid بدون رحلة إضافية
                     result = conn.execute("""INSERT INTO transactions (transaction_type,item_id,qty,unit_id,supplier_name,unit_price,expiry_date,transaction_date,notes,created_by)
                                   VALUES (?,?,?,?,?,?,NULL,?,?,?) RETURNING id""",
                                  ('وارد', it['id'], qty, it['unit_id'], supplier if supplier != "لا يوجد موردين مسجلين" else "", unit_price, invoice_date.isoformat(), notes, st.session_state.user['full_name']))
@@ -1863,18 +1756,16 @@ elif choice == "📥 الوارد":
                     conn.commit()
                     check_and_alert_item(it['id'])
                     _clear_all_caches()
-                    st.success(f"تم الحفظ بنجاح (تاريخ الفاتورة: {invoice_date.isoformat()})")
+                    st.success(f"تم الحفظ بنجاح")
                     st.session_state.inward_defaults = {
                         'item': item, 'qty': qty, 'supplier': supplier,
                         'unit_price': unit_price, 'invoice_date': invoice_date, 'notes': notes
                     }
                     st.session_state.inward_form_values = st.session_state.inward_defaults.copy()
                     st.rerun()
-
                 if undo:
                     st.session_state.inward_form_values = st.session_state.inward_defaults.copy()
                     st.rerun()
-
                 if redo:
                     if 'inward_redo_values' in st.session_state:
                         st.session_state.inward_form_values = st.session_state.inward_redo_values.copy()
@@ -1886,23 +1777,17 @@ elif choice == "📥 الوارد":
     with tab_in2:
         st.subheader("📋 سجل المشتريات")
         conn = get_db()
-
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             start_date = st.date_input("من تاريخ", date.today() - timedelta(days=30), key="in_start")
         with col_f2:
             end_date = st.date_input("إلى تاريخ", date.today(), key="in_end")
-
         inward_records = conn.execute("""
             SELECT t.id, t.transaction_date, t.item_id, i.name as item_name, t.qty, u.unit_symbol, t.notes, t.attachment, t.supplier_name, t.unit_price
-            FROM transactions t
-            JOIN items i ON t.item_id = i.id
+            FROM transactions t JOIN items i ON t.item_id = i.id
             LEFT JOIN units u ON t.unit_id = u.id
-            WHERE t.transaction_type = 'وارد'
-            AND t.transaction_date BETWEEN ? AND ?
-            ORDER BY t.id DESC
+            WHERE t.transaction_type = 'وارد' AND t.transaction_date BETWEEN ? AND ? ORDER BY t.id DESC
         """, (start_date.isoformat(), end_date.isoformat())).fetchall()
-
         if not inward_records:
             st.info("لا توجد مشتريات في هذه الفترة")
         else:
@@ -1913,43 +1798,31 @@ elif choice == "📥 الوارد":
                 value = (rec['qty'] or 0) * (rec['unit_price'] or 0)
                 total_value += value
                 table_data.append({
-                    'الرقم': rec['id'],
-                    'التاريخ': rec['transaction_date'],
-                    'الصنف': rec['item_name'],
-                    'الكمية': f"{rec['qty']} {rec['unit_symbol'] or ''}",
-                    'المورد': rec['supplier_name'] or '-',
+                    'الرقم': rec['id'], 'التاريخ': rec['transaction_date'], 'الصنف': rec['item_name'],
+                    'الكمية': f"{rec['qty']} {rec['unit_symbol'] or ''}", 'المورد': rec['supplier_name'] or '-',
                     'سعر الوحدة': f"{rec['unit_price']:.2f}" if rec['unit_price'] else '-',
-                    'الإجمالي': f"{value:.2f}" if value else '-',
-                    'مرفق': has_attach,
+                    'الإجمالي': f"{value:.2f}" if value else '-', 'مرفق': has_attach,
                 })
-
             df_summary = pd.DataFrame(table_data)
-
             with st.expander("🎨 تنسيق الجدول", expanded=False):
                 font_scale_in = st.slider("حجم الخط (%)", 50, 200, 100, 10, key="in_log_font")
                 color_in = st.selectbox("لون الجدول", ["افتراضي", "أخضر", "أزرق", "رمادي", "برتقالي"], key="in_log_color")
                 color_map_in = {"افتراضي": "#f0f2f6", "أخضر": "#e6ffe6", "أزرق": "#e6f0ff", "رمادي": "#f5f5f5", "برتقالي": "#fff3e6"}
                 bg_in = color_map_in.get(color_in, "#f0f2f6")
-
-            st.dataframe(df_summary[df_summary.columns[::-1]], use_container_width=True, hide_index=True)
+            show_rtl_table(df_summary, use_container_width=True, hide_index=True)
             st.markdown(apply_table_styling(font_scale_in, bg_in), unsafe_allow_html=True)
-
             col_sum1, col_sum2 = st.columns(2)
             with col_sum1:
                 st.markdown(f"**📊 عدد الحركات:** `{len(inward_records)}`")
             with col_sum2:
                 st.markdown(f"**💰 إجمالي القيمة:** `{total_value:.2f}`")
-
             export_buttons(df_summary, "سجل_المشتريات", "تقرير سجل المشتريات")
-
             st.divider()
             st.subheader("🔍 عرض تفاصيل حركة")
-
             record_options = [f"#{rec['id']} - {rec['item_name']} - {rec['transaction_date']} ({rec['qty']} {rec['unit_symbol'] or ''})" for rec in inward_records]
             selected_option = st.selectbox("اختر الحركة لعرض التفاصيل", record_options, key="inward_detail_select")
             selected_idx = record_options.index(selected_option)
             rec = inward_records[selected_idx]
-
             st.divider()
             col_det1, col_det2 = st.columns(2)
             with col_det1:
@@ -1964,12 +1837,10 @@ elif choice == "📥 الوارد":
             with col_det2:
                 st.write(f"**التاريخ:** {rec['transaction_date']}")
                 st.write(f"**ملاحظات:** {rec['notes'] or 'لا يوجد'}")
-
             if rec['attachment']:
                 display_attachment(rec['attachment'], "المرفق")
             else:
                 st.caption("لا يوجد مرفق لهذه الحركة")
-
             with st.expander("📎 إضافة / تحديث المرفق", expanded=False):
                 up_att = st.file_uploader("اختر ملف (صورة أو PDF)", type=["png", "jpg", "jpeg", "pdf"], key=f"late_att_{rec['id']}")
                 if up_att is not None:
@@ -1983,10 +1854,8 @@ elif choice == "📥 الوارد":
                             st.rerun()
                         else:
                             st.error("فشل رفع المرفق")
-
             st.divider()
-            col_btn_print, col_btn_edit, col_btn_delete = st.columns(3)
-
+            col_btn_print, col_btn_delete = st.columns(2)
             with col_btn_print:
                 if st.button(f"🖨️ طباعة PDF", key=f"print_in_{rec['id']}", type="primary"):
                     font_path = get_arabic_font()
@@ -2012,16 +1881,7 @@ elif choice == "📥 الوارد":
                     pdf.cell(0, 8, shape_arabic(f"ملاحظات: {rec['notes'] or 'لا يوجد'}"), ln=True, align='R')
                     pdf.ln(10)
                     pdf.cell(0, 10, shape_arabic("توقيع أمين المخزن: ________________"), ln=True, align='R')
-
-                    pdf_bytes = bytes(pdf.output())
-                    st.download_button(f"📥 تحميل PDF", data=pdf_bytes,
-                                       file_name=f"Purchase_Order_{rec['id']}.pdf", mime="application/pdf")
-
-            with col_btn_edit:
-                if st.button(f"✏️ تعديل", key=f"edit_in_{rec['id']}"):
-                    st.session_state[f"editing_in_{rec['id']}"] = True
-                    st.rerun()
-
+                    st.download_button(f"📥 تحميل PDF", data=bytes(pdf.output()), file_name=f"Purchase_Order_{rec['id']}.pdf", mime="application/pdf")
             with col_btn_delete:
                 if st.button(f"🗑️ حذف #{rec['id']}", key=f"del_in_{rec['id']}"):
                     if st.session_state.get(f"confirm_del_in_{rec['id']}", False):
@@ -2038,112 +1898,52 @@ elif choice == "📥 الوارد":
                         st.warning("⚠️ اضغط مرة أخرى لتأكيد الحذف")
                         st.rerun()
 
-            if st.session_state.get(f"editing_in_{rec['id']}", False):
-                with st.form(key=f"edit_form_in_{rec['id']}"):
-                    st.markdown("---")
-                    st.subheader(f"✏️ تعديل الوارد #{rec['id']}")
-                    items_list = conn.execute("SELECT id, name, unit_id FROM items WHERE is_active=1").fetchall()
-                    current_item_index = [i['id'] for i in items_list].index(rec['item_id']) if rec['item_id'] in [i['id'] for i in items_list] else 0
-                    new_item = st.selectbox("الصنف", [i['name'] for i in items_list], index=current_item_index)
-                    new_qty = st.number_input("الكمية", min_value=0.1, value=float(rec['qty']))
-                    suppliers_list = conn.execute("SELECT id, supplier_name FROM suppliers ORDER BY supplier_name").fetchall()
-                    supplier_options_edit = [s['supplier_name'] for s in suppliers_list]
-                    if supplier_options_edit:
-                        current_supplier = rec['supplier_name'] if rec['supplier_name'] in supplier_options_edit else supplier_options_edit[0]
-                        new_supplier = st.selectbox("المورد", supplier_options_edit, index=supplier_options_edit.index(current_supplier))
-                    else:
-                        new_supplier = ""
-                    new_unit_price = st.number_input("سعر الوحدة", min_value=0.0, value=float(rec['unit_price'] or 0), step=0.01)
-                    try:
-                        d_val = datetime.strptime(rec['transaction_date'], '%Y-%m-%d').date()
-                    except Exception:
-                        d_val = date.today()
-                    new_invoice_date = st.date_input("تاريخ الفاتورة", value=d_val)
-                    new_notes = st.text_input("ملاحظات", value=rec['notes'] or "")
-                    new_attachment = st.file_uploader("📎 استبدال المرفق (اختياري)", type=["png", "jpg", "jpeg", "pdf"])
-
-                    col_save, col_cancel = st.columns(2)
-                    with col_save:
-                        save_edit = st.form_submit_button("💾 حفظ التعديلات", type="primary")
-                    with col_cancel:
-                        cancel_edit = st.form_submit_button("❌ إلغاء")
-
-                    if save_edit:
-                        old_item_id = rec['item_id']
-                        new_item_data = next((i for i in items_list if i['name'] == new_item), None)
-                        conn.execute("UPDATE items SET current_balance = current_balance - ?, last_updated=? WHERE id=?", (rec['qty'], date.today().isoformat(), old_item_id))
-                        conn.execute("UPDATE items SET current_balance = current_balance + ?, last_updated=? WHERE id=?", (new_qty, date.today().isoformat(), new_item_data['id']))
-                        attachment_name = rec['attachment']
-                        if new_attachment:
-                            attachment_name = save_attachment_to_telegram(new_attachment, rec['id'])
-                        conn.execute("""UPDATE transactions SET item_id=?, qty=?, unit_id=?, supplier_name=?, unit_price=?, transaction_date=?, notes=?, attachment=?
-                                      WHERE id=?""",
-                                     (new_item_data['id'], new_qty, new_item_data['unit_id'], new_supplier, new_unit_price, new_invoice_date.isoformat(), new_notes, attachment_name, rec['id']))
-                        conn.commit()
-                        _clear_all_caches()
-                        st.success("تم تعديل الوارد بنجاح")
-                        st.session_state[f"editing_in_{rec['id']}"] = False
-                        st.rerun()
-
-                    if cancel_edit:
-                        st.session_state[f"editing_in_{rec['id']}"] = False
-                        st.rerun()
-
 elif choice == "📤 الصادر":
     tab_out1, tab_out2 = st.tabs(["📝 إنشاء إذن صرف", "📋 سجل أذون الصرف"])
 
     with tab_out1:
         st.subheader("إنشاء إذن صرف جديد")
         conn = get_db()
-
         col_refresh, _ = st.columns([1, 4])
         with col_refresh:
             if st.button("🔄 تحديث البيانات", key="refresh_outward_data"):
                 _clear_all_caches()
                 st.success("تم التحديث")
                 st.rerun()
-
         if '_out_items_cached' not in st.session_state:
             _ci = _cache_items_for_outward()
             st.session_state._out_items_cached = [{'id': r[0], 'name': r[1], 'current_balance': r[2], 'unit_id': r[3]} for r in _ci]
         if '_out_hotels_cached' not in st.session_state:
             _ch = _cache_hotels()
             st.session_state._out_hotels_cached = [{'id': r[0], 'name': r[1], 'contact_person': r[2], 'phone': r[3]} for r in _ch]
-
         items = st.session_state._out_items_cached
         hotels = st.session_state._out_hotels_cached
-
         if not items or not hotels:
             st.warning("يجب إضافة أصناف وفنادق أولاً")
         else:
             added_qty = {}
             for entry in st.session_state.get('outward_items', []):
                 added_qty[entry['item_id']] = added_qty.get(entry['item_id'], 0) + entry['qty']
-
             item_options = []
             for it in items:
                 effective_balance = it['current_balance'] - added_qty.get(it['id'], 0)
                 item_options.append(f"{it['name']} (المتاح: {effective_balance})")
-
             if 'outward_items' not in st.session_state:
                 st.session_state.outward_items = []
             if 'outward_form_defaults' not in st.session_state:
                 st.session_state.outward_form_defaults = {
                     'hotel': hotels[0]['name'],
                     'recipient': hotels[0]['contact_person'] if hotels[0]['contact_person'] else "",
-                    'order_date': date.today(),
-                    'notes': ""
+                    'order_date': date.today(), 'notes': ""
                 }
             if 'outward_form_values' not in st.session_state:
                 st.session_state.outward_form_values = st.session_state.outward_form_defaults.copy()
-
             st.subheader("إضافة أصناف للإذن")
             col1, col2 = st.columns(2)
             with col1:
                 selected_item_str = st.selectbox("الصنف", item_options, key="item_select")
             with col2:
                 qty = st.number_input("الكمية", min_value=0.1, value=1.0, step=0.1, key="qty_input")
-
             col_add, col_undo_items = st.columns(2)
             with col_add:
                 if st.button("➕ أضف إلى الإذن"):
@@ -2158,10 +1958,7 @@ elif choice == "📤 الصادر":
                                 st.error(f"الرصيد غير كافٍ (المتاح: {effective})")
                             else:
                                 st.session_state.outward_items.append({
-                                    'item_id': it['id'],
-                                    'item_name': it['name'],
-                                    'qty': qty,
-                                    'unit_id': it['unit_id']
+                                    'item_id': it['id'], 'item_name': it['name'], 'qty': qty, 'unit_id': it['unit_id']
                                 })
                                 st.success(f"تمت إضافة {item_name} ({qty})")
                                 st.rerun()
@@ -2173,7 +1970,6 @@ elif choice == "📤 الصادر":
                         st.rerun()
                     else:
                         st.info("لا توجد أصناف في القائمة")
-
             if st.session_state.outward_items:
                 st.subheader("الأصناف في الإذن الحالي")
                 df_current = pd.DataFrame(st.session_state.outward_items)
@@ -2181,12 +1977,10 @@ elif choice == "📤 الصادر":
                 df_current['الوحدة'] = df_current['unit_id'].map(unit_dict_out)
                 df_display = df_current[['item_name', 'qty', 'الوحدة']].copy()
                 df_display.columns = ['الصنف', 'الكمية', 'الوحدة']
-                st.dataframe(df_display, use_container_width=True)
-
+                show_rtl_table(df_display, use_container_width=True, hide_index=True)
                 if st.button("🗑️ مسح القائمة"):
                     st.session_state.outward_items = []
                     st.rerun()
-
                 st.divider()
                 st.subheader("بيانات الإذن")
                 col_order1, col_order2 = st.columns(2)
@@ -2198,13 +1992,10 @@ elif choice == "📤 الصادر":
                     current_hotel = next((h for h in hotels if h['name'] == selected_hotel), None)
                 with col_order2:
                     recipient = st.text_input("اسم مسؤول الاستلام (للتوقيع)",
-                                              value=st.session_state.outward_form_values['recipient'],
-                                              key="recipient")
+                                              value=st.session_state.outward_form_values['recipient'], key="recipient")
                     order_date = st.date_input("تاريخ الإذن",
-                                               value=st.session_state.outward_form_values['order_date'],
-                                               key="order_date")
+                                               value=st.session_state.outward_form_values['order_date'], key="order_date")
                 notes = st.text_area("ملاحظات الإذن", value=st.session_state.outward_form_values['notes'], key="notes")
-
                 col_submit, col_undo, col_redo = st.columns([2, 1, 1])
                 with col_submit:
                     submitted = st.button("✅ تأكيد الصرف وإنشاء الإذن", type="primary")
@@ -2212,7 +2003,6 @@ elif choice == "📤 الصادر":
                     undo = st.button("↩️ تراجع")
                 with col_redo:
                     redo = st.button("↪️ تقديم")
-
                 if submitted:
                     if not recipient:
                         st.error("يرجى إدخال اسم مسؤول الاستلام")
@@ -2229,14 +2019,11 @@ elif choice == "📤 الصادر":
                         if valid:
                             order_number = generate_outward_order_number()
                             hotel_id = current_hotel['id']
-                            # استخدام RETURNING id
                             result = conn.execute("""INSERT INTO outward_orders (order_number, hotel_id, recipient_name, order_date, notes, created_by)
                                           VALUES (?,?,?,?,?,?) RETURNING id""",
                                          (order_number, hotel_id, recipient, order_date.isoformat(), notes, st.session_state.user['full_name']))
                             row = result.fetchone()
                             order_id = row['id'] if row else None
-
-                            # تنفيذ كل الإدخالات والتحديثات في دفعة واحدة
                             batch_queries = []
                             for item_entry in st.session_state.outward_items:
                                 batch_queries.append(("""INSERT INTO transactions (transaction_type, item_id, hotel_id, qty, unit_id, transaction_date, notes, created_by, order_id)
@@ -2245,11 +2032,9 @@ elif choice == "📤 الصادر":
                                               order_date.isoformat(), f"إذن رقم {order_number}", st.session_state.user['full_name'], order_id)))
                                 batch_queries.append(("UPDATE items SET current_balance = current_balance - ?, last_updated=? WHERE id=?",
                                                      (item_entry['qty'], date.today().isoformat(), item_entry['item_id'])))
-
                             try:
                                 conn.execute_write_batch(batch_queries, is_insert=True)
                             except Exception:
-                                # fallback: تنفيذ عادي
                                 for item_entry in st.session_state.outward_items:
                                     conn.execute("""INSERT INTO transactions (transaction_type, item_id, hotel_id, qty, unit_id, transaction_date, notes, created_by, order_id)
                                                   VALUES (?,?,?,?,?,?,?,?,?)""",
@@ -2257,22 +2042,18 @@ elif choice == "📤 الصادر":
                                                   order_date.isoformat(), f"إذن رقم {order_number}", st.session_state.user['full_name'], order_id))
                                     conn.execute("UPDATE items SET current_balance = current_balance - ?, last_updated=? WHERE id=?",
                                                  (item_entry['qty'], date.today().isoformat(), item_entry['item_id']))
-
                             conn.commit()
                             for item_entry in st.session_state.outward_items:
                                 check_and_alert_item(item_entry['item_id'])
                             _clear_all_caches()
-                            st.success(f"تم الحفظ بنجاح (تاريخ الإذن: {order_date.isoformat()})")
+                            st.success(f"تم الحفظ بنجاح")
                             st.session_state.outward_form_defaults = {
-                                'hotel': selected_hotel,
-                                'recipient': recipient,
-                                'order_date': order_date,
-                                'notes': notes
+                                'hotel': selected_hotel, 'recipient': recipient,
+                                'order_date': order_date, 'notes': notes
                             }
                             st.session_state.outward_form_values = st.session_state.outward_form_defaults.copy()
                             st.session_state.outward_items = []
                             st.rerun()
-
                 if undo:
                     st.session_state.outward_form_values = st.session_state.outward_form_defaults.copy()
                     st.rerun()
@@ -2280,21 +2061,16 @@ elif choice == "📤 الصادر":
     with tab_out2:
         st.subheader("📋 سجل أذون الصرف")
         conn = get_db()
-
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             start_date = st.date_input("من تاريخ", date.today() - timedelta(days=30), key="out_start")
         with col_f2:
             end_date = st.date_input("إلى تاريخ", date.today(), key="out_end")
-
         orders = conn.execute("""
             SELECT o.id, o.order_number, o.order_date, h.name as hotel_name, o.recipient_name, o.notes
-            FROM outward_orders o
-            JOIN hotels h ON o.hotel_id = h.id
-            WHERE o.order_date BETWEEN ? AND ?
-            ORDER BY o.id DESC
+            FROM outward_orders o JOIN hotels h ON o.hotel_id = h.id
+            WHERE o.order_date BETWEEN ? AND ? ORDER BY o.id DESC
         """, (start_date.isoformat(), end_date.isoformat())).fetchall()
-
         if not orders:
             st.info("لا توجد أذون صرف في هذه الفترة")
         else:
@@ -2302,35 +2078,26 @@ elif choice == "📤 الصادر":
             for order in orders:
                 items_count = conn.execute("SELECT COUNT(*) FROM transactions WHERE order_id=? AND transaction_type='صادر'", (order['id'],)).fetchone()[0]
                 table_orders.append({
-                    'رقم الإذن': order['order_number'],
-                    'التاريخ': order['order_date'],
-                    'الفندق': order['hotel_name'],
-                    'مسؤول الاستلام': order['recipient_name'],
-                    'عدد الأصناف': items_count,
-                    'ملاحظات': order['notes'] or '-',
+                    'رقم الإذن': order['order_number'], 'التاريخ': order['order_date'],
+                    'الفندق': order['hotel_name'], 'مسؤول الاستلام': order['recipient_name'],
+                    'عدد الأصناف': items_count, 'ملاحظات': order['notes'] or '-',
                 })
-
             df_orders = pd.DataFrame(table_orders)
-
             with st.expander("🎨 تنسيق الجدول", expanded=False):
                 font_scale_out = st.slider("حجم الخط (%)", 50, 200, 100, 10, key="out_log_font")
                 color_out = st.selectbox("لون الجدول", ["افتراضي", "أخضر", "أزرق", "رمادي", "برتقالي"], key="out_log_color")
                 color_map_out = {"افتراضي": "#f0f2f6", "أخضر": "#e6ffe6", "أزرق": "#e6f0ff", "رمادي": "#f5f5f5", "برتقالي": "#fff3e6"}
                 bg_out = color_map_out.get(color_out, "#f0f2f6")
-
-            st.dataframe(df_orders, use_container_width=True, hide_index=True)
+            show_rtl_table(df_orders, use_container_width=True, hide_index=True)
             st.markdown(apply_table_styling(font_scale_out, bg_out), unsafe_allow_html=True)
             st.caption(f"📊 إجمالي الأذون: {len(orders)}")
             export_buttons(df_orders, "سجل_أذون_الصرف", "تقرير أذون الصرف")
-
             st.divider()
             st.subheader("🔍 عرض تفاصيل إذن")
-
             order_options = [f"{o['order_number']} - {o['hotel_name']} - {o['order_date']}" for o in orders]
             selected_order_option = st.selectbox("اختر الإذن", order_options, key="out_detail_select")
             selected_idx = order_options.index(selected_order_option)
             order = orders[selected_idx]
-
             st.divider()
             col_det1, col_det2 = st.columns(2)
             with col_det1:
@@ -2340,23 +2107,17 @@ elif choice == "📤 الصادر":
                 st.write(f"**مسؤول الاستلام:** {order['recipient_name']}")
             with col_det2:
                 st.write(f"**ملاحظات:** {order['notes'] or 'لا يوجد'}")
-
             items_in_order = conn.execute("""
-                SELECT i.name, t.qty, u.unit_symbol
-                FROM transactions t
-                JOIN items i ON t.item_id = i.id
-                LEFT JOIN units u ON t.unit_id = u.id
+                SELECT i.name, t.qty, u.unit_symbol FROM transactions t
+                JOIN items i ON t.item_id = i.id LEFT JOIN units u ON t.unit_id = u.id
                 WHERE t.order_id = ? AND t.transaction_type = 'صادر'
             """, (order['id'],)).fetchall()
-
             if items_in_order:
                 st.markdown("### الأصناف المصروفة")
                 df_items = pd.DataFrame([list(r) for r in items_in_order], columns=['الصنف', 'الكمية', 'الوحدة'])
-                st.dataframe(df_items, use_container_width=True, hide_index=True)
-
+                show_rtl_table(df_items, use_container_width=True, hide_index=True)
             st.divider()
             col_btn_print, col_btn_delete = st.columns(2)
-
             with col_btn_print:
                 if st.button(f"🖨️ طباعة PDF", key=f"print_out_{order['id']}", type="primary"):
                     font_path = get_arabic_font()
@@ -2391,11 +2152,7 @@ elif choice == "📤 الصادر":
                     pdf.ln(10)
                     pdf.cell(0, 10, shape_arabic(f"توقيع مسؤول الاستلام ({order['recipient_name']}): ________________"), ln=True, align='R')
                     pdf.cell(0, 10, shape_arabic("توقيع أمين المخزن: ________________"), ln=True, align='R')
-
-                    pdf_bytes = bytes(pdf.output())
-                    st.download_button(f"📥 تحميل PDF", data=pdf_bytes,
-                                       file_name=f"{order['order_number']}.pdf", mime="application/pdf")
-
+                    st.download_button(f"📥 تحميل PDF", data=bytes(pdf.output()), file_name=f"{order['order_number']}.pdf", mime="application/pdf")
             with col_btn_delete:
                 if st.button(f"🗑️ حذف الإذن {order['order_number']}", key=f"del_out_{order['id']}"):
                     if st.session_state.get(f"confirm_del_out_{order['id']}", False):
@@ -2415,9 +2172,7 @@ elif choice == "📤 الصادر":
 elif choice == "📝 الجرد":
     st.header("الجرد الدوري")
     conn = get_db()
-
     items_full = conn.execute("SELECT id, name, current_balance, unit_id FROM items WHERE is_active=1 ORDER BY name").fetchall()
-
     if items_full:
         item_names = [i['name'] for i in items_full]
         item = st.selectbox("الصنف", item_names)
@@ -2430,7 +2185,7 @@ elif choice == "📝 الجرد":
             if diff != 0:
                 conn.execute("INSERT INTO transactions (transaction_type,item_id,qty,unit_id,transaction_date,notes,created_by) VALUES (?,?,?,?,?,?,?)",
                              ('تسوية إضافة' if diff > 0 else 'تسوية عجز', it['id'], abs(diff), it['unit_id'], date.today().isoformat(), notes, st.session_state.user['full_name']))
-                st.success(f"تم إضافة حركة {'تسوية إضافة' if diff > 0 else 'تسوية عجز'} بمقدار {abs(diff)}.")
+                st.success(f"تم إضافة حركة بمقدار {abs(diff)}.")
             conn.execute("UPDATE items SET current_balance=?, last_updated=? WHERE id=?", (actual, date.today().isoformat(), it['id']))
             conn.execute("INSERT INTO inventory_counts (count_date,item_id,expected_qty,actual_qty,difference,notes,counted_by) VALUES (?,?,?,?,?,?,?)",
                          (date.today().isoformat(), it['id'], it['current_balance'], actual, diff, notes, st.session_state.user['full_name']))
@@ -2459,23 +2214,18 @@ elif choice == "📈 التقارير":
         items_filter = conn.execute("SELECT id, name FROM items WHERE is_active=1").fetchall()
         item_names = ["الكل"] + [it['name'] for it in items_filter]
         selected_item = st.selectbox("الصنف", item_names)
-
         with st.expander("🎨 تنسيق الجدول"):
             font_scale = st.slider("حجم الخط (%)", 50, 200, 100, step=10, key="report_font")
             color_option = st.selectbox("لون الجدول", ["افتراضي", "أخضر", "أزرق", "رمادي", "برتقالي"], key="report_color")
             color_map = {"افتراضي": "#f0f2f6", "أخضر": "#e6ffe6", "أزرق": "#e6f0ff", "رمادي": "#f5f5f5", "برتقالي": "#fff3e6"}
             bg_color = color_map.get(color_option, "#f0f2f6")
-
             all_columns = ['رقم الحركة', 'التاريخ', 'الصنف', 'النوع', 'الكمية', 'الوحدة', 'الفندق', 'المورد', 'سعر الوحدة', 'ملاحظات', 'مرفق']
             cols_order = column_selector("اختر الأعمدة ورتبها", all_columns, ['رقم الحركة', 'التاريخ', 'الصنف', 'النوع', 'الكمية', 'الوحدة', 'الفندق', 'المورد', 'ملاحظات', 'مرفق'], "trans_cols")
-
         query = """
             SELECT t.id, t.transaction_date, i.name AS item_name, t.transaction_type, t.qty, u.unit_symbol,
                    COALESCE(h.name, '-') AS hotel_name, t.supplier_name, t.unit_price, t.notes, t.attachment
-            FROM transactions t
-            JOIN items i ON t.item_id = i.id
-            LEFT JOIN hotels h ON t.hotel_id = h.id
-            LEFT JOIN units u ON t.unit_id = u.id
+            FROM transactions t JOIN items i ON t.item_id = i.id
+            LEFT JOIN hotels h ON t.hotel_id = h.id LEFT JOIN units u ON t.unit_id = u.id
             WHERE t.transaction_date BETWEEN ? AND ?
         """
         params = [d1.isoformat(), d2.isoformat()]
@@ -2494,25 +2244,20 @@ elif choice == "📈 التقارير":
         data = conn.execute(query, params).fetchall()
         if data:
             df = pd.DataFrame([list(r) for r in data], columns=['رقم الحركة', 'التاريخ', 'الصنف', 'النوع', 'الكمية', 'الوحدة', 'الفندق', 'المورد', 'سعر الوحدة', 'ملاحظات', 'مرفق'])
-
             def attachment_status(fid):
-                if fid:
-                    return "📎 موجود"
-                return ""
+                return "📎 موجود" if fid else ""
             if 'مرفق' in df.columns:
                 df['مرفق'] = df['مرفق'].apply(attachment_status)
-
             ordered = [c for c in cols_order if c in df.columns]
             remaining = [c for c in df.columns if c not in ordered]
             df_display = df[ordered + remaining]
-            st.dataframe(df_display, use_container_width=True)
+            show_rtl_table(df_display, use_container_width=True, hide_index=True)
             st.markdown(apply_table_styling(font_scale, bg_color), unsafe_allow_html=True)
             export_df = df.drop(columns=['مرفق'], errors='ignore')
             export_df = export_df[[c for c in ordered if c in export_df.columns]]
             export_buttons(export_df, "حركات", "تقرير الحركات")
-
             total_qty = df['الكمية'].sum()
-            st.markdown(f"**📊 إجمالي الكمية خلال الفترة:** `{total_qty}`")
+            st.markdown(f"**📊 إجمالي الكمية:** `{total_qty}`")
         else:
             st.info("لا توجد حركات")
     with tab2:
@@ -2523,17 +2268,15 @@ elif choice == "📈 التقارير":
             color_map2 = {"افتراضي": "#f0f2f6", "أخضر": "#e6ffe6", "أزرق": "#e6f0ff", "رمادي": "#f5f5f5", "برتقالي": "#fff3e6"}
             bg2 = color_map2.get(color_option2, "#f0f2f6")
             bal_cols = column_selector("اختر الأعمدة ورتبها (للأرصدة)", ['كود', 'الصنف', 'الرصيد', 'الوحدة'], ['كود', 'الصنف', 'الرصيد', 'الوحدة'], "bal_cols")
-
         items = conn.execute("SELECT i.item_code, i.name, i.current_balance, u.unit_symbol FROM items i LEFT JOIN units u ON i.unit_id=u.id WHERE i.is_active=1").fetchall()
         if items:
             df = pd.DataFrame([list(r) for r in items], columns=['كود', 'الصنف', 'الرصيد', 'الوحدة'])
             ordered = [c for c in bal_cols if c in df.columns]
             remaining = [c for c in df.columns if c not in ordered]
             df_disp = df[ordered + remaining]
-            st.dataframe(df_disp, use_container_width=True)
+            show_rtl_table(df_disp, use_container_width=True, hide_index=True)
             st.markdown(apply_table_styling(font_scale2, bg2), unsafe_allow_html=True)
-            report_title = f"تقرير الأرصدة - {date.today().strftime('%Y-%m-%d')}"
-            export_buttons(df_disp, "ارصدة", report_title)
+            export_buttons(df_disp, "ارصدة", f"تقرير الأرصدة - {date.today()}")
         else:
             st.info("لا توجد أصناف نشطة")
 
@@ -2548,7 +2291,7 @@ elif choice == "🗑️ إدارة الحركات (حذف)":
                            ORDER BY t.id DESC LIMIT 50""").fetchall()
     if trans:
         df = pd.DataFrame([list(r) for r in trans], columns=['رقم', 'النوع', 'الصنف', 'الفندق', 'الكمية', 'التاريخ', 'ملاحظات'])
-        st.dataframe(df)
+        show_rtl_table(df, use_container_width=True, hide_index=True)
         trans_id = st.number_input("أدخل رقم الحركة للحذف", min_value=1, step=1)
         if st.button("حذف الحركة واسترجاع تأثيرها"):
             ok, msg = delete_transaction(trans_id)
@@ -2573,7 +2316,6 @@ elif choice == "💾 النسخ الاحتياطي":
                 st.download_button("⬇️ تحميل النسخة", f, file_name=os.path.basename(path))
         else:
             st.error(msg)
-
     st.subheader("استعادة نسخة")
     up = st.file_uploader("اختر ملف zip", type="zip")
     if up is not None:
@@ -2589,7 +2331,6 @@ elif choice == "💾 النسخ الاحتياطي":
                 st.rerun()
             else:
                 st.error(msg)
-
     st.divider()
     st.subheader("📱 النسخ الاحتياطي عبر تيليجرام")
     if st.button("⬆️ رفع قاعدة البيانات إلى تيليجرام"):
@@ -2597,7 +2338,7 @@ elif choice == "💾 النسخ الاحتياطي":
             success, msg = telegram_send_document(DB_NAME, caption=f"نسخة احتياطية {datetime.now().strftime('%Y-%m-%d %H:%M')}")
         if success:
             st.success(msg)
-            st.info(f"📎 معرّف الملف (File ID) الحالي: `{st.session_state.telegram_file_id}`")
+            st.info(f"📎 معرّف الملف: `{st.session_state.telegram_file_id}`")
         else:
             st.error(msg)
     if st.button("⬇️ استعادة قاعدة البيانات من تيليجرام"):
@@ -2620,7 +2361,7 @@ elif choice == "👥 المستخدمين":
     users = conn.execute("SELECT username, role, full_name FROM users").fetchall()
     if users:
         df = pd.DataFrame([list(u) for u in users], columns=['مستخدم', 'دور', 'اسم'])
-        st.dataframe(df, use_container_width=True)
+        show_rtl_table(df, use_container_width=True, hide_index=True)
     with st.form("add_user"):
         un = st.text_input("اسم المستخدم")
         pw = st.text_input("كلمة المرور", type="password")
