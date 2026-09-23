@@ -90,8 +90,28 @@ def apply_theme():
         text-align: right !important;
     }}
     
-    [data-testid="InputInstructions"] {{
+    /* إخفاء keyboard_ar */
+    [data-testid="InputInstructions"],
+    [data-testid="stTextInputRootElement"] small,
+    [data-testid="stNumberInputRootElement"] small,
+    [data-baseweb="input"] small,
+    [data-baseweb="base-input"] small,
+    [data-baseweb="textarea"] small,
+    .stTextInput div small,
+    .stNumberInput div small,
+    .stTextArea div small,
+    input ~ small, input + small, textarea ~ small, textarea + small,
+    div:has(> input) > small, div:has(> textarea) > small,
+    [class*="keyboard"], [class*="Keyboard"],
+    [class*="shortcut"], [class*="Shortcut"] {{
         display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        height: 0 !important;
+        width: 0 !important;
+        max-height: 0 !important;
+        overflow: hidden !important;
+        pointer-events: none !important;
     }}
     
     [data-testid="stDataFrame"] {{
@@ -111,6 +131,7 @@ def apply_theme():
         }}
     }}
     </style>""", unsafe_allow_html=True)
+
 apply_theme()
 
 DB_NAME = 'cleaning_inventory.db'
@@ -1161,7 +1182,6 @@ def column_selector(label, all_columns, default_order, key):
 
 
 def show_rtl_table(df, **kwargs):
-    """عرض جدول بأعمدة معكوسة (RTL)"""
     if df is None or df.empty:
         return
     df_rev = df[df.columns[::-1]]
@@ -1175,6 +1195,8 @@ _load_settings_from_db()
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.user = None
+if 'show_settings' not in st.session_state:
+    st.session_state.show_settings = False
 
 if not st.session_state.logged_in:
     st.title("🔐 تسجيل الدخول")
@@ -1189,60 +1211,79 @@ if not st.session_state.logged_in:
                 st.error("خطأ")
     st.stop()
 
-st.title(f"🧹 {st.session_state.store_name}")
-logo_b64 = st.session_state.get('logo_base64', '')
-if logo_b64:
-    try:
-        st.markdown(f'<img src="data:image/png;base64,{logo_b64}" width="150" />', unsafe_allow_html=True)
-    except Exception:
-        pass
-st.write(f"مرحباً {st.session_state.user['full_name']} ({st.session_state.user['role']})")
-if st.button("تسجيل الخروج"):
-    logout()
+# ======================== الهيدر الجديد ========================
+col_logo, col_info, col_actions = st.columns([1, 4, 2])
 
-with st.expander("⚙️ الإعدادات", expanded=False):
-    new_font_size = st.slider("حجم الخط (%)", 50, 200, st.session_state.font_size, step=10, key="global_font")
-    theme_color = st.color_picker("لون البرنامج", st.session_state.theme_color, key="global_theme")
-    new_store_name = st.text_input("اسم المستودع", value=st.session_state.store_name, key="store_name_input")
+with col_logo:
+    logo_b64 = st.session_state.get('logo_base64', '')
+    if logo_b64:
+        try:
+            st.markdown(f'<img src="data:image/png;base64,{logo_b64}" width="90" />', unsafe_allow_html=True)
+        except Exception:
+            pass
 
-    if st.button("تحديث الاسم"):
-        st.session_state.store_name = new_store_name
-        set_setting('store_name', new_store_name)
-        st.success("تم تحديث الاسم")
-        st.rerun()
+with col_info:
+    st.markdown(f"### 🧹 {st.session_state.store_name}")
+    st.caption(f"مرحباً **{st.session_state.user['full_name']}** ({st.session_state.user['role']})")
 
-    uploaded_logo = st.file_uploader("رفع شعار", type=["png", "jpg", "jpeg"])
-    if uploaded_logo is not None:
-        b64 = base64.b64encode(uploaded_logo.getbuffer()).decode()
-        st.session_state.logo_base64 = b64
-        set_setting('logo_base64', b64)
-        st.success("تم حفظ الشعار")
-        st.rerun()
+with col_actions:
+    st.write("")
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if st.button("⚙️ الإعدادات", use_container_width=True, key="btn_toggle_settings"):
+            st.session_state.show_settings = not st.session_state.get('show_settings', False)
+            st.rerun()
+    with col_btn2:
+        if st.button("🚪 خروج", use_container_width=True, key="btn_logout_top"):
+            logout()
 
-    if st.session_state.get('logo_base64'):
-        if st.button("مسح الشعار"):
-            st.session_state.logo_base64 = ''
-            set_setting('logo_base64', '')
+# ======================== الإعدادات (تظهر عند الطلب) ========================
+if st.session_state.get('show_settings', False):
+    with st.container(border=True):
+        st.markdown("### ⚙️ الإعدادات")
+
+        new_font_size = st.slider("حجم الخط (%)", 50, 200, st.session_state.font_size, step=10, key="global_font")
+        theme_color = st.color_picker("لون البرنامج", st.session_state.theme_color, key="global_theme")
+        new_store_name = st.text_input("اسم المستودع", value=st.session_state.store_name, key="store_name_input")
+
+        if st.button("تحديث الاسم"):
+            st.session_state.store_name = new_store_name
+            set_setting('store_name', new_store_name)
+            st.success("تم تحديث الاسم")
             st.rerun()
 
-    if new_font_size != st.session_state.font_size or theme_color != st.session_state.theme_color:
-        st.session_state.font_size = new_font_size
-        st.session_state.theme_color = theme_color
-        set_setting('font_size', new_font_size)
-        set_setting('theme_color', theme_color)
-        st.rerun()
+        uploaded_logo = st.file_uploader("رفع شعار", type=["png", "jpg", "jpeg"])
+        if uploaded_logo is not None:
+            b64 = base64.b64encode(uploaded_logo.getbuffer()).decode()
+            st.session_state.logo_base64 = b64
+            set_setting('logo_base64', b64)
+            st.success("تم حفظ الشعار")
+            st.rerun()
 
-    st.subheader("📱 إعداد تيليجرام")
-    token_input = st.text_input("Bot Token", value=st.session_state.telegram_bot_token, type="password", key="tg_token")
-    chat_input = st.text_input("Chat ID", value=st.session_state.telegram_chat_id, key="tg_chat")
-    file_id_input = st.text_input("File ID (اختياري)", value=st.session_state.telegram_file_id, key="tg_file_id")
+        if st.session_state.get('logo_base64'):
+            if st.button("مسح الشعار"):
+                st.session_state.logo_base64 = ''
+                set_setting('logo_base64', '')
+                st.rerun()
 
-    if st.button("💾 حفظ بيانات تيليجرام"):
-        st.session_state.telegram_bot_token = token_input
-        st.session_state.telegram_chat_id = chat_input
-        st.session_state.telegram_file_id = file_id_input
-        set_setting('telegram_file_id', file_id_input)
-        st.success("تم حفظ بيانات تيليجرام")
+        if new_font_size != st.session_state.font_size or theme_color != st.session_state.theme_color:
+            st.session_state.font_size = new_font_size
+            st.session_state.theme_color = theme_color
+            set_setting('font_size', new_font_size)
+            set_setting('theme_color', theme_color)
+            st.rerun()
+
+        st.subheader("📱 إعداد تيليجرام")
+        token_input = st.text_input("Bot Token", value=st.session_state.telegram_bot_token, type="password", key="tg_token")
+        chat_input = st.text_input("Chat ID", value=st.session_state.telegram_chat_id, key="tg_chat")
+        file_id_input = st.text_input("File ID (اختياري)", value=st.session_state.telegram_file_id, key="tg_file_id")
+
+        if st.button("💾 حفظ بيانات تيليجرام"):
+            st.session_state.telegram_bot_token = token_input
+            st.session_state.telegram_chat_id = chat_input
+            st.session_state.telegram_file_id = file_id_input
+            set_setting('telegram_file_id', file_id_input)
+            st.success("تم حفظ بيانات تيليجرام")
 
 menu = []
 if check_perm():
